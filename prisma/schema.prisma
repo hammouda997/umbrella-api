@@ -1,0 +1,351 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  CHEF_AGENCE
+  SUPPORT
+  PICKUP
+  MAGASINIER
+  EXPEDITEUR
+  LIVREUR
+  CLIENT
+}
+
+enum DeliveryMode {
+  EXTERNAL
+  INTERNAL
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ParcelStatus {
+  NON_SERIEUX
+  EN_ATTENTE
+  A_ENLEVER
+  ENLEVES
+  AU_DEPOT
+  EXPEDIE_DESTINATION
+  ARRIVE_DESTINATION
+  AFFECTE_LIVREUR
+  RETOUR_DEPOT
+  EN_COURS
+  A_VERIFIER
+  LIVRES
+  LIVRES_PAYES
+  ECHANGES
+  REMBOURSES
+  LIVRAISON_ANNULEE
+  RETOUR_DEFINITIF
+  RETOUR_INTER_AGENCE
+  RETOUR_EXPEDITEURS
+  RETOUR_RECU
+  SAISIE_DOUANE
+  SUPPRIME
+}
+
+model User {
+  id               Int              @id @default(autoincrement())
+  name             String
+  email            String           @unique
+  password         String
+  phone            String?
+  role             Role             @default(CLIENT)
+  agencyId         Int?
+  agency           Agency?          @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  zoneId           Int?
+  homeZone         Zone?            @relation("LivreurZone", fields: [zoneId], references: [id], onDelete: SetNull)
+  approvalStatus   ApprovalStatus   @default(APPROVED)
+  approvedAt       DateTime?
+  approvedById     Int?
+  approvedBy       User?            @relation("UserApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedUsers    User[]           @relation("UserApprover")
+  governorate      String?
+  city             String?
+  address          String?
+  shopName         String?
+  productTypes     String[]         @default([])
+  productNotes     String?
+  refreshToken     String?
+  isActive         Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  parcels          Parcel[]         @relation("SenderParcels")
+  assigned         Parcel[]         @relation("DriverParcels")
+  zones            Zone[]
+  ticketsCreated   Ticket[]         @relation("TicketCreator")
+  paymentRequests  PaymentRequest[]
+  parcelEvents     ParcelEvent[]
+  codSettlements   Parcel[]         @relation("CodSettler")
+  conversationParts ConversationParticipant[]
+  messagesSent     Message[]        @relation("MessageSender")
+  callsMade        CallSession[]    @relation("CallCaller")
+  callsReceived    CallSession[]    @relation("CallCallee")
+
+  @@index([agencyId])
+  @@index([zoneId])
+  @@index([approvalStatus])
+}
+
+/** Gouvernorat agency — separate from livreur fleet Zone. */
+model Agency {
+  id          Int      @id @default(autoincrement())
+  name        String
+  governorate String   @unique
+  isActive    Boolean  @default(true)
+  users       User[]
+  parcels     Parcel[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/**
+ * Super-admin routing: which gouvernorat defaults to Navex (EXTERNAL)
+ * vs Umbrella fleet (INTERNAL) when creating a parcel.
+ */
+model DeliveryRoute {
+  id          Int          @id @default(autoincrement())
+  governorate String       @unique
+  mode        DeliveryMode @default(EXTERNAL)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+/** Livreur / fleet delivery zone (map radius). Not used for agency staff scope. */
+model Zone {
+  id          Int      @id @default(autoincrement())
+  name        String
+  governorate String?
+  centerLat   Float?
+  centerLng   Float?
+  radiusKm    Float?
+  isActive    Boolean  @default(true)
+  createdById Int?
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+  drivers     User[]   @relation("LivreurZone")
+  parcels     Parcel[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Parcel {
+  id            Int           @id @default(autoincrement())
+  code          String?       @unique
+  recipientName String
+  phone         String
+  phone2        String?
+  governorate   String
+  city          String
+  locality      String?
+  address       String
+  price         Decimal       @db.Decimal(12, 3)
+  articleCount  Int           @default(1)
+  parcelCount   Int           @default(1)
+  designation   String?
+  notes         String?
+  paymentMode   String?
+  allowOpen     Boolean       @default(false)
+  isExchange    Boolean       @default(false)
+  exchangeNotes String?
+  mode          DeliveryMode  @default(EXTERNAL)
+  status        ParcelStatus  @default(EN_ATTENTE)
+  bordereauUrl  String?
+  navexRaw      Json?
+  lastLat       Float?
+  lastLng       Float?
+  lat           Float?
+  lng           Float?
+  deliveryWindow      String?
+  tryProduct          Boolean   @default(false)
+  liabilityAcceptedAt DateTime?
+  landmarkPhotoName   String?
+  addressQuality      Int?
+  codSettledAt        DateTime?
+  codSettledById      Int?
+  codSettledBy        User?     @relation("CodSettler", fields: [codSettledById], references: [id], onDelete: SetNull)
+  events              ParcelEvent[]
+  senderId      Int
+  sender        User          @relation("SenderParcels", fields: [senderId], references: [id])
+  driverId      Int?
+  driver        User?         @relation("DriverParcels", fields: [driverId], references: [id])
+  zoneId        Int?
+  zone          Zone?         @relation(fields: [zoneId], references: [id])
+  agencyId      Int?
+  agency        Agency?       @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  tickets       Ticket[]
+  paymentItems  PaymentItem[]
+  conversations Conversation[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([status])
+  @@index([senderId])
+  @@index([mode])
+  @@index([driverId])
+  @@index([code])
+  @@index([agencyId])
+}
+
+model ParcelEvent {
+  id        Int           @id @default(autoincrement())
+  parcelId  Int
+  parcel    Parcel        @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  status    ParcelStatus?
+  label     String
+  comment   String?
+  actorId   Int?
+  actor     User?         @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt DateTime      @default(now())
+
+  @@index([parcelId, createdAt])
+}
+
+enum TicketStatus {
+  EN_COURS
+  RESOLU
+  FERME
+}
+
+model Ticket {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String?
+  status      TicketStatus @default(EN_COURS)
+  parcelId    Int?
+  parcel      Parcel?      @relation(fields: [parcelId], references: [id])
+  createdById Int
+  createdBy   User         @relation("TicketCreator", fields: [createdById], references: [id])
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([createdById])
+  @@index([status])
+}
+
+enum PaymentRequestStatus {
+  EN_DEMANDE
+  APPROUVE
+  PAYE
+  REJETE
+}
+
+model PaymentRequest {
+  id          Int                  @id @default(autoincrement())
+  amount      Decimal              @db.Decimal(12, 3)
+  status      PaymentRequestStatus @default(EN_DEMANDE)
+  note        String?
+  senderId    Int
+  sender      User                 @relation(fields: [senderId], references: [id])
+  items       PaymentItem[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([senderId])
+  @@index([status])
+}
+
+model PaymentItem {
+  id               Int            @id @default(autoincrement())
+  paymentRequestId Int
+  paymentRequest   PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+  parcelId         Int
+  parcel           Parcel         @relation(fields: [parcelId], references: [id])
+  amount           Decimal        @db.Decimal(12, 3)
+
+  @@unique([paymentRequestId, parcelId])
+}
+
+/** Dashboard KPI category styling (color + icon). Managed by SUPER_ADMIN only. */
+model StatusCategory {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  label     String
+  color     String
+  icon      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+}
+
+enum CallStatus {
+  RINGING
+  ACTIVE
+  ENDED
+  MISSED
+  REJECTED
+}
+
+model Conversation {
+  id            Int                       @id @default(autoincrement())
+  parcelId      Int?
+  parcel        Parcel?                   @relation(fields: [parcelId], references: [id], onDelete: SetNull)
+  lastMessageAt DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  participants  ConversationParticipant[]
+  messages      Message[]
+  calls         CallSession[]
+
+  @@index([lastMessageAt])
+  @@index([parcelId])
+}
+
+model ConversationParticipant {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         Int
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       Int
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+model CallSession {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  callerId       Int
+  caller         User         @relation("CallCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  calleeId       Int
+  callee         User         @relation("CallCallee", fields: [calleeId], references: [id], onDelete: Cascade)
+  status         CallStatus   @default(RINGING)
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId])
+  @@index([callerId])
+  @@index([calleeId])
+  @@index([status])
+}

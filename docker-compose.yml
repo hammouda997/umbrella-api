@@ -1,0 +1,79 @@
+# Local / staging stack: Postgres + API (+ optional Coturn).
+# Web is usually `npm run dev` or Vercel; optional service included for all-in-one.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-umbrella}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-umbrella}
+      POSTGRES_DB: ${POSTGRES_DB:-umbrella}
+    ports:
+      - "${POSTGRES_PORT:-5436}:5432"
+    volumes:
+      - umbrella_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    profiles: ["stack"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-umbrella}:${POSTGRES_PASSWORD:-umbrella}@postgres:5432/${POSTGRES_DB:-umbrella}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      PORT: 3011
+      NODE_ENV: production
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3010}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      NAVEX_ENABLED: ${NAVEX_ENABLED:-false}
+      NAVEX_API_BASE_URL: ${NAVEX_API_BASE_URL:-}
+      NAVEX_CLIENT_SLUG: ${NAVEX_CLIENT_SLUG:-}
+      NAVEX_API_KEY: ${NAVEX_API_KEY:-}
+      NAVEX_API_TOKEN: ${NAVEX_API_TOKEN:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_REALM: ${TURN_REALM:-umbrella.local}
+      TURN_URLS: ${TURN_URLS:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      CONTACT_INBOX: ${CONTACT_INBOX:-}
+    ports:
+      - "3011:3011"
+
+  coturn:
+    profiles: ["turn"]
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+    environment:
+      DETECT_EXTERNAL_IP: "yes"
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --fingerprint
+      - --lt-cred-mech
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:-umbrella-dev-turn-secret}
+      - --realm=${TURN_REALM:-umbrella.local}
+      - --no-multicast-peers
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+
+volumes:
+  umbrella_pg:

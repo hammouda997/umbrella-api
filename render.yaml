@@ -1,0 +1,34 @@
+# Render Blueprint — always-on Nest API + managed Postgres
+# https://dashboard.render.com/blueprints
+
+services:
+  - type: web
+    name: umbrella-api
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SWAGGER_ENABLED
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: umbrella-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: NAVEX_ENABLED
+        value: "false"
+      - key: PORT
+        value: "3011"
+
+databases:
+  - name: umbrella-db
+    plan: basic-256mb
+    databaseName: umbrella
+    user: umbrella
