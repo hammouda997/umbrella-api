@@ -137,9 +137,22 @@ export class AuthService {
   }
 
   async signin(dto: SignInDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-    });
+    const login = dto.email.trim();
+    const phoneLogin = /^[0-9]{8}$/.test(login);
+    const user = phoneLogin
+      ? await this.prisma.user.findFirst({
+          where: {
+            role: Role.CLIENT,
+            OR: [
+              { phone: login },
+              { email: `c${login}@client.umbrella.tn` },
+            ],
+            isActive: true,
+          },
+        })
+      : await this.prisma.user.findUnique({
+          where: { email: login.toLowerCase() },
+        });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid credentials');
     }

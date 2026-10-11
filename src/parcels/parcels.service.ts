@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -41,6 +42,7 @@ import {
   isAgencyRole,
   isGlobalStaff,
 } from '../common/agency-roles';
+import { ClientAccountsService } from '../sms/client-accounts.service';
 
 const STAFF_ROLES: Role[] = OPS_STAFF;
 const SENDER_ROLES: Role[] = [
@@ -58,6 +60,12 @@ const STATUS_ROLES: Role[] = [
 ];
 const SENDER_EDITABLE: ParcelStatus[] = [
   ParcelStatus.EN_ATTENTE,
+  ParcelStatus.NON_SERIEUX,
+];
+/** Client may correct delivery details until pickup is done. */
+const CLIENT_EDITABLE: ParcelStatus[] = [
+  ParcelStatus.EN_ATTENTE,
+  ParcelStatus.A_ENLEVER,
   ParcelStatus.NON_SERIEUX,
 ];
 const NOT_DELETED = {
@@ -80,12 +88,18 @@ export class ParcelsService {
     private readonly prisma: PrismaService,
     private readonly navex: NavexService,
     private readonly deliveryRoutes: DeliveryRoutesService,
+    private readonly clientAccounts: ClientAccountsService,
   ) {}
+
+  private normalizePhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '').slice(-8);
+    return /^[0-9]{8}$/.test(digits) ? digits : phone.trim();
+  }
 
   private editableData(dto: UpdateParcelDto) {
     return {
       recipientName: dto.recipientName,
-      phone: dto.phone,
+      phone: dto.phone !== undefined ? this.normalizePhone(dto.phone) : undefined,
       phone2: dto.phone2,
       governorate: dto.governorate,
       city: dto.city,
@@ -148,6 +162,34 @@ export class ParcelsService {
     });
   }
 
+  /** Start of "today" in Africa/Tunis for bordereau doublon checks. */
+  private tunisiaDayStart(at: Date = new Date()): Date {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Tunis',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(at);
+    const y = Number(parts.find((p) => p.type === 'year')?.value);
+    const m = Number(parts.find((p) => p.type === 'month')?.value);
+    const d = Number(parts.find((p) => p.type === 'day')?.value);
+    // Africa/Tunis is UTC+1 without DST — store as UTC instant of Tunis midnight.
+    return new Date(Date.UTC(y, m - 1, d, -1, 0, 0, 0));
+  }
+
+  private async hasBordereauScanToday(parcelId: number): Promise<boolean> {
+    const since = this.tunisiaDayStart();
+    const hit = await this.prisma.parcelEvent.findFirst({
+      where: {
+        parcelId,
+        label: 'Scan bordereau',
+        createdAt: { gte: since },
+      },
+      select: { id: true },
+    });
+    return !!hit;
+  }
+
   private async pushToNavex(dto: CreateParcelDto) {
     const external = await this.navex.createParcel({
       nom: dto.recipientName,
@@ -203,13 +245,17 @@ export class ParcelsService {
       this.generateCode(mode === DeliveryMode.EXTERNAL ? 'UMB-EXT' : 'UMB');
 
     const agencyId = await this.resolveAgencyId(dto.governorate);
+    const phone = this.normalizePhone(dto.phone);
+    if (!/^[0-9]{8}$/.test(phone)) {
+      throw new BadRequestException('Téléphone destinataire : 8 chiffres');
+    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const parcel = await tx.parcel.create({
         data: {
           ...this.editableData(dto),
           recipientName: dto.recipientName,
-          phone: dto.phone,
+          phone,
           governorate: dto.governorate,
           city: dto.city,
           address: dto.address,
@@ -238,6 +284,19 @@ export class ParcelsService {
       });
       return parcel;
     });
+
+    void this.clientAccounts
+      .notifyClientParcelCreated({
+        phone,
+        name: dto.recipientName,
+        parcelCode: created.code ?? `UMB-${created.id}`,
+        governorate: dto.governorate,
+        city: dto.city,
+        address: dto.address,
+      })
+      .catch((err) =>
+        this.logger.warn(`Client SMS notify failed: ${String(err)}`),
+      );
 
     return this.findOneForUser(user, created.id);
   }
@@ -359,6 +418,16 @@ export class ParcelsService {
     ) {
       throw new ForbiddenException('Only pending parcels can be edited');
     }
+    if (user.role === Role.CLIENT) {
+      if (!CLIENT_EDITABLE.includes(parcel.status)) {
+        throw new ForbiddenException(
+          'Modification client uniquement avant enlèvement',
+        );
+      }
+      if (dto.price !== undefined) {
+        throw new ForbiddenException('Le client ne peut pas modifier le prix');
+      }
+    }
 
     const nextGov = dto.governorate ?? parcel.governorate;
     const agencyId =
@@ -366,17 +435,42 @@ export class ParcelsService {
         ? await this.resolveAgencyId(nextGov)
         : undefined;
 
+    const raw =
+      user.role === Role.CLIENT
+        ? {
+            recipientName: dto.recipientName,
+            phone:
+              dto.phone !== undefined
+                ? this.normalizePhone(dto.phone)
+                : undefined,
+            phone2: dto.phone2,
+            governorate: dto.governorate,
+            city: dto.city,
+            locality: dto.locality,
+            address: dto.address,
+            notes: dto.notes,
+            deliveryWindow: dto.deliveryWindow,
+            ...(agencyId !== undefined ? { agencyId } : {}),
+          }
+        : {
+            ...this.editableData(dto),
+            ...(agencyId !== undefined ? { agencyId } : {}),
+          };
+    const data = Object.fromEntries(
+      Object.entries(raw).filter(([, v]) => v !== undefined),
+    );
+
     await this.prisma.$transaction(async (tx) => {
       await tx.parcel.update({
         where: { id },
-        data: {
-          ...this.editableData(dto),
-          ...(agencyId !== undefined ? { agencyId } : {}),
-        },
+        data,
       });
       await this.recordEvent(tx, {
         parcelId: id,
-        label: 'Colis modifié',
+        label:
+          user.role === Role.CLIENT
+            ? 'Coordonnées mises à jour (client)'
+            : 'Colis modifié',
         actorId: user.id,
       });
     });
@@ -438,7 +532,137 @@ export class ParcelsService {
     });
   }
 
+  private async resolveReturnLotByCode(code: string) {
+    const normalized = this.normalizeCode(code);
+    return this.prisma.returnLot.findFirst({
+      where: {
+        OR: [
+          { code: normalized },
+          { code: { equals: normalized, mode: 'insensitive' } },
+        ],
+      },
+      include: {
+        sender: { select: { id: true, name: true, email: true } },
+        items: {
+          orderBy: { sortOrder: 'asc' },
+          include: { parcel: { include: PARCEL_LIST_INCLUDE } },
+        },
+      },
+    });
+  }
+
+  private toReturnLotScanView(
+    lot: NonNullable<Awaited<ReturnType<typeof this.resolveReturnLotByCode>>>,
+  ) {
+    return {
+      kind: 'return_lot' as const,
+      id: lot.id,
+      code: lot.code,
+      status: lot.status,
+      senderId: lot.senderId,
+      sender: lot.sender,
+      itemCount: lot.items.length,
+      closedAt: lot.closedAt,
+      createdAt: lot.createdAt,
+      updatedAt: lot.updatedAt,
+      parcels: lot.items.map((item) => toParcelListView(item.parcel)),
+    };
+  }
+
+  private canReadReturnLot(user: AuthUser, senderId: number) {
+    if (user.role === Role.EXPEDITEUR) return user.id === senderId;
+    return (
+      user.role === Role.SUPER_ADMIN ||
+      user.role === Role.ADMIN ||
+      user.role === Role.CHEF_AGENCE ||
+      user.role === Role.MAGASINIER ||
+      user.role === Role.SUPPORT ||
+      user.role === Role.PICKUP ||
+      user.role === Role.LIVREUR
+    );
+  }
+
+  private async resolvePickupManifestByCode(code: string) {
+    const normalized = this.normalizeCode(code);
+    return this.prisma.pickupManifest.findFirst({
+      where: {
+        OR: [
+          { code: normalized },
+          { code: { equals: normalized, mode: 'insensitive' } },
+        ],
+      },
+      include: {
+        sender: { select: { id: true, name: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        items: {
+          orderBy: { sortOrder: 'asc' },
+          include: { parcel: { include: PARCEL_LIST_INCLUDE } },
+        },
+      },
+    });
+  }
+
+  private toPickupManifestScanView(
+    manifest: NonNullable<
+      Awaited<ReturnType<typeof this.resolvePickupManifestByCode>>
+    >,
+  ) {
+    return {
+      kind: 'pickup_manifest' as const,
+      id: manifest.id,
+      code: manifest.code,
+      manifestKind: manifest.kind,
+      status: manifest.status,
+      senderId: manifest.senderId,
+      sender: manifest.sender,
+      createdById: manifest.createdById,
+      createdBy: manifest.createdBy,
+      itemCount: manifest.items.length,
+      closedAt: manifest.closedAt,
+      createdAt: manifest.createdAt,
+      updatedAt: manifest.updatedAt,
+      parcels: manifest.items.map((item) => toParcelListView(item.parcel)),
+    };
+  }
+
+  private canReadPickupManifest(
+    user: AuthUser,
+    senderId: number | null,
+    createdById: number,
+  ) {
+    if (user.role === Role.EXPEDITEUR) {
+      return senderId === user.id || createdById === user.id;
+    }
+    return (
+      user.role === Role.SUPER_ADMIN ||
+      user.role === Role.ADMIN ||
+      user.role === Role.CHEF_AGENCE ||
+      user.role === Role.MAGASINIER ||
+      user.role === Role.SUPPORT ||
+      user.role === Role.PICKUP ||
+      user.role === Role.LIVREUR
+    );
+  }
+
   async findByCodeForUser(user: AuthUser, code: string) {
+    const lot = await this.resolveReturnLotByCode(code);
+    if (lot) {
+      if (!this.canReadReturnLot(user, lot.senderId)) {
+        throw new ForbiddenException();
+      }
+      return this.toReturnLotScanView(lot);
+    }
+
+    const manifest = await this.resolvePickupManifestByCode(code);
+    if (manifest) {
+      if (
+        !this.canReadPickupManifest(user, manifest.senderId, manifest.createdById)
+      ) {
+        throw new ForbiddenException();
+      }
+      return this.toPickupManifestScanView(manifest);
+    }
+
     const scope = await this.scopeFor(user);
     if (!scope) throw new NotFoundException('Parcel not found');
 
@@ -456,6 +680,34 @@ export class ParcelsService {
   async scan(user: AuthUser, dto: ScanParcelDto) {
     if (!STATUS_ROLES.includes(user.role)) throw new ForbiddenException();
 
+    const lot = await this.resolveReturnLotByCode(dto.code);
+    if (lot) {
+      if (!this.canReadReturnLot(user, lot.senderId)) {
+        throw new ForbiddenException();
+      }
+      if (dto.status) {
+        throw new BadRequestException(
+          'Un lot retour ne peut pas changer de statut ici — ouvrez chaque colis',
+        );
+      }
+      return this.toReturnLotScanView(lot);
+    }
+
+    const manifest = await this.resolvePickupManifestByCode(dto.code);
+    if (manifest) {
+      if (
+        !this.canReadPickupManifest(user, manifest.senderId, manifest.createdById)
+      ) {
+        throw new ForbiddenException();
+      }
+      if (dto.status) {
+        throw new BadRequestException(
+          'Un manifeste ne peut pas changer de statut ici — ouvrez chaque colis',
+        );
+      }
+      return this.toPickupManifestScanView(manifest);
+    }
+
     const parcel = await this.resolveParcelByCode(dto.code);
     if (!parcel) throw new NotFoundException('Parcel not found');
 
@@ -464,6 +716,12 @@ export class ParcelsService {
     }
 
     if (!dto.status) {
+      const alreadyToday = await this.hasBordereauScanToday(parcel.id);
+      if (alreadyToday) {
+        throw new ConflictException(
+          `Doublon — bordereau ${parcel.code ?? parcel.id} déjà scanné aujourd’hui`,
+        );
+      }
       await this.prisma.$transaction(async (tx) => {
         await this.recordEvent(tx, {
           parcelId: parcel.id,
@@ -668,6 +926,19 @@ export class ParcelsService {
         actorId: user.id,
       });
     });
+
+    void this.clientAccounts
+      .notifyLivreurAssigned({
+        driverPhone: driver.phone,
+        driverName: driver.name,
+        parcelCode: parcel.code ?? `UMB-${parcel.id}`,
+        recipientName: parcel.recipientName,
+        city: parcel.city,
+      })
+      .catch((err) =>
+        this.logger.warn(`Livreur SMS notify failed: ${String(err)}`),
+      );
+
     return this.findOneForUser(user, id);
   }
 
@@ -793,6 +1064,17 @@ export class ParcelsService {
     }
     if (user.role === Role.EXPEDITEUR && parcel.senderId === user.id)
       return parcel;
+    if (user.role === Role.CLIENT) {
+      const me = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { phone: true },
+      });
+      if (me?.phone) {
+        const mine = this.normalizePhone(me.phone);
+        const theirs = this.normalizePhone(parcel.phone);
+        if (mine === theirs || parcel.phone === me.phone) return parcel;
+      }
+    }
     throw new ForbiddenException();
   }
 

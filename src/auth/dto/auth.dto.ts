@@ -83,8 +83,13 @@ export class SignUpDto {
 }
 
 export class SignInDto {
-  @ApiProperty()
-  @IsEmail()
+  @ApiProperty({
+    description: 'Email, ou téléphone client 8 chiffres',
+    example: '51926850',
+  })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(120)
   email!: string;
 
   @ApiProperty()

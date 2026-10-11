@@ -13,8 +13,17 @@ import { Role } from '@prisma/client';
 import { TicketsService } from './tickets.service';
 import { CreateTicketDto, UpdateTicketStatusDto } from './dto/ticket.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/auth.decorators';
 import { RolesGuard } from '../common/guards/roles.guard';
+
+const TICKET_ROLES = [
+  Role.SUPER_ADMIN,
+  Role.ADMIN,
+  Role.SUPPORT,
+  Role.EXPEDITEUR,
+  Role.CLIENT,
+] as const;
 
 @ApiTags('tickets')
 @ApiBearerAuth()
@@ -23,27 +32,24 @@ export class TicketsController {
   constructor(private readonly tickets: TicketsService) {}
 
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EXPEDITEUR, Role.CLIENT)
+  @Roles(...TICKET_ROLES)
   @Post()
-  create(
-    @CurrentUser() user: { id: number; role: Role; email: string },
-    @Body() dto: CreateTicketDto,
-  ) {
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateTicketDto) {
     return this.tickets.create(user, dto);
   }
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EXPEDITEUR, Role.CLIENT)
-  list(@CurrentUser() user: { id: number; role: Role; email: string }) {
+  @Roles(...TICKET_ROLES)
+  list(@CurrentUser() user: AuthUser) {
     return this.tickets.list(user);
   }
 
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EXPEDITEUR, Role.CLIENT)
+  @Roles(...TICKET_ROLES)
   @Patch(':id/status')
   updateStatus(
-    @CurrentUser() user: { id: number; role: Role; email: string },
+    @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTicketStatusDto,
   ) {

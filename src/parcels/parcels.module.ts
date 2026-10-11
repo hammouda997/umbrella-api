@@ -10,5 +10,6 @@ import { DeliveryRoutesModule } from '../delivery-routes/delivery-routes.module'
   imports: [NavexModule, DeliveryRoutesModule],
   controllers: [ParcelsController, CodController],
   providers: [ParcelsService, CodService],
+  exports: [ParcelsService],
 })
 export class ParcelsModule {}

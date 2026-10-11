@@ -16,6 +16,10 @@ import { TicketsModule } from './tickets/tickets.module';
 import { PaymentsModule } from './payments/payments.module';
 import { CommsModule } from './comms/comms.module';
 import { PublicModule } from './public/public.module';
+import { ReturnLotsModule } from './return-lots/return-lots.module';
+import { PickupManifestsModule } from './pickup-manifests/pickup-manifests.module';
+import { SupportBotModule } from './support-bot/support-bot.module';
+import { SmsModule } from './sms/sms.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { HealthController } from './health/health.controller';
 
@@ -24,12 +28,16 @@ import { HealthController } from './health/health.controller';
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
+    SmsModule,
     AuthModule,
     NavexModule,
     UsersModule,
     ParcelsModule,
     TicketsModule,
     PaymentsModule,
+    ReturnLotsModule,
+    PickupManifestsModule,
+    SupportBotModule,
     DashboardModule,
     ZonesModule,
     StatusCategoriesModule,

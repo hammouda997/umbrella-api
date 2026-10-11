@@ -1,19 +1,28 @@
 import {
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
+  Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TicketStatus } from '@prisma/client';
+import { TicketKind, TicketStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 
 export class CreateTicketDto {
-  @ApiProperty()
+  @ApiPropertyOptional({ enum: TicketKind, default: TicketKind.GENERAL })
+  @IsOptional()
+  @IsEnum(TicketKind)
+  kind?: TicketKind;
+
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
   @MinLength(3)
-  title!: string;
+  title?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -25,6 +34,17 @@ export class CreateTicketDto {
   @Type(() => Number)
   @IsInt()
   parcelId?: number;
+
+  @ApiPropertyOptional({
+    description: 'Nouveau montant (requis pour CHANGEMENT_PRIX)',
+  })
+  @ValidateIf(
+    (o: CreateTicketDto) => o.kind === TicketKind.CHANGEMENT_PRIX,
+  )
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0.001)
+  requestedPrice?: number;
 }
 
 export class UpdateTicketStatusDto {

@@ -93,6 +93,9 @@ model User {
   messagesSent     Message[]        @relation("MessageSender")
   callsMade        CallSession[]    @relation("CallCaller")
   callsReceived    CallSession[]    @relation("CallCallee")
+  returnLots       ReturnLot[]
+  pickupManifestsCreated PickupManifest[] @relation("PickupManifestCreator")
+  pickupManifestsAsSender PickupManifest[] @relation("PickupManifestSender")
 
   @@index([agencyId])
   @@index([zoneId])
@@ -187,6 +190,8 @@ model Parcel {
   tickets       Ticket[]
   paymentItems  PaymentItem[]
   conversations Conversation[]
+  returnLotItems ReturnLotItem[]
+  pickupManifestItems PickupManifestItem[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -196,6 +201,82 @@ model Parcel {
   @@index([driverId])
   @@index([code])
   @@index([agencyId])
+}
+
+enum ReturnLotStatus {
+  OPEN
+  CLOSED
+}
+
+model ReturnLot {
+  id        Int             @id @default(autoincrement())
+  code      String          @unique
+  senderId  Int
+  sender    User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  status    ReturnLotStatus @default(OPEN)
+  closedAt  DateTime?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  items     ReturnLotItem[]
+
+  @@index([senderId])
+  @@index([status])
+  @@index([code])
+}
+
+model ReturnLotItem {
+  id        Int       @id @default(autoincrement())
+  lotId     Int
+  lot       ReturnLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  parcelId  Int       @unique
+  parcel    Parcel    @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([lotId])
+}
+
+enum PickupManifestKind {
+  EN_ATTENTE
+  PRE_ENLEVEMENT
+}
+
+enum PickupManifestStatus {
+  OPEN
+  CLOSED
+}
+
+model PickupManifest {
+  id          Int                  @id @default(autoincrement())
+  code        String               @unique
+  kind        PickupManifestKind
+  status      PickupManifestStatus @default(OPEN)
+  createdById Int
+  createdBy   User                 @relation("PickupManifestCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  senderId    Int?
+  sender      User?                @relation("PickupManifestSender", fields: [senderId], references: [id], onDelete: SetNull)
+  closedAt    DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  items       PickupManifestItem[]
+
+  @@index([kind])
+  @@index([status])
+  @@index([createdById])
+  @@index([senderId])
+  @@index([code])
+}
+
+model PickupManifestItem {
+  id         Int            @id @default(autoincrement())
+  manifestId Int
+  manifest   PickupManifest @relation(fields: [manifestId], references: [id], onDelete: Cascade)
+  parcelId   Int            @unique
+  parcel     Parcel         @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  sortOrder  Int            @default(0)
+  createdAt  DateTime       @default(now())
+
+  @@index([manifestId])
 }
 
 model ParcelEvent {
@@ -218,20 +299,30 @@ enum TicketStatus {
   FERME
 }
 
+enum TicketKind {
+  GENERAL
+  CHANGEMENT_PRIX
+  RELANCE
+}
+
 model Ticket {
-  id          Int          @id @default(autoincrement())
-  title       String
-  description String?
-  status      TicketStatus @default(EN_COURS)
-  parcelId    Int?
-  parcel      Parcel?      @relation(fields: [parcelId], references: [id])
-  createdById Int
-  createdBy   User         @relation("TicketCreator", fields: [createdById], references: [id])
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id             Int          @id @default(autoincrement())
+  title          String
+  description    String?
+  kind           TicketKind   @default(GENERAL)
+  requestedPrice Decimal?     @db.Decimal(12, 3)
+  status         TicketStatus @default(EN_COURS)
+  parcelId       Int?
+  parcel         Parcel?      @relation(fields: [parcelId], references: [id])
+  createdById    Int
+  createdBy      User         @relation("TicketCreator", fields: [createdById], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([createdById])
   @@index([status])
+  @@index([kind])
+  @@index([parcelId])
 }
 
 enum PaymentRequestStatus {

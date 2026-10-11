@@ -345,6 +345,34 @@ const PARCELS: SeedParcel[] = [
     daysAgo: 10,
   },
   {
+    code: 'UMB-RET-002',
+    recipientName: 'Amira Trabelsi',
+    phone: '51926850',
+    governorate: 'Sfax',
+    city: 'Sfax',
+    address: 'Route de Mahdia',
+    price: 55,
+    notes: 'Retour lot demo',
+    status: ParcelStatus.RETOUR_DEPOT,
+    mode: DeliveryMode.INTERNAL,
+    bordereauUrl: null,
+    daysAgo: 4,
+  },
+  {
+    code: 'UMB-RET-003',
+    recipientName: 'Hedi Mansour',
+    phone: '51926850',
+    governorate: 'Monastir',
+    city: 'Monastir',
+    address: 'Corniche',
+    price: 38,
+    notes: 'Retour lot demo',
+    status: ParcelStatus.LIVRAISON_ANNULEE,
+    mode: DeliveryMode.INTERNAL,
+    bordereauUrl: null,
+    daysAgo: 3,
+  },
+  {
     code: 'UMB-LIVP-001',
     recipientName: 'Demo Client',
     phone: '51926850',
@@ -444,6 +472,8 @@ const TICKETS: Array<{
   title: string;
   description: string;
   status: TicketStatus;
+  kind?: 'GENERAL' | 'CHANGEMENT_PRIX' | 'RELANCE';
+  requestedPrice?: number;
   daysAgo: number;
   parcel: string;
   by: UserKey;
@@ -452,25 +482,29 @@ const TICKETS: Array<{
     title: 'Colis endommagé à la livraison',
     description: 'Le carton était ouvert.',
     status: TicketStatus.EN_COURS,
+    kind: 'GENERAL',
     daysAgo: 1,
     parcel: 'UMB-LIV-001',
     by: 'client',
   },
   {
-    title: 'Retard de livraison Sahel',
+    title: 'Relance colis · UMB-COURS-001',
     description: 'Client relance depuis 48h.',
     status: TicketStatus.EN_COURS,
+    kind: 'RELANCE',
     daysAgo: 2,
     parcel: 'UMB-COURS-001',
     by: 'expediteur',
   },
   {
-    title: 'Changement d’adresse',
-    description: 'Passer à Cité Ennasr.',
-    status: TicketStatus.RESOLU,
-    daysAgo: 4,
-    parcel: 'UMB-ATT-001',
-    by: 'client',
+    title: 'Changement de prix · UMB-ENL-001',
+    description: 'Prix COD incorrect.',
+    status: TicketStatus.EN_COURS,
+    kind: 'CHANGEMENT_PRIX',
+    requestedPrice: 32,
+    daysAgo: 1,
+    parcel: 'UMB-ENL-001',
+    by: 'expediteur',
   },
 ];
 
@@ -515,7 +549,7 @@ function daysAgo(offset: number) {
 
 async function resetTables() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "PaymentItem", "PaymentRequest", "Ticket", "ParcelEvent", "Parcel", "Zone", "User", "StatusCategory", "Agency", "DeliveryRoute", "Message", "ConversationParticipant", "CallSession", "Conversation" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "PickupManifestItem", "PickupManifest", "ReturnLotItem", "ReturnLot", "PaymentItem", "PaymentRequest", "Ticket", "ParcelEvent", "Parcel", "Zone", "User", "StatusCategory", "Agency", "DeliveryRoute", "Message", "ConversationParticipant", "CallSession", "Conversation" RESTART IDENTITY CASCADE',
   );
 }
 
@@ -651,16 +685,30 @@ async function main() {
   }
 
   for (const t of TICKETS) {
-    await prisma.ticket.create({
+    const ticket = await prisma.ticket.create({
       data: {
         title: t.title,
         description: t.description,
         status: t.status,
+        kind: t.kind ?? 'GENERAL',
+        requestedPrice: t.requestedPrice ?? null,
         parcelId: parcelIds[t.parcel],
         createdById: userIds[t.by],
         createdAt: daysAgo(t.daysAgo),
       },
     });
+    if (t.kind === 'RELANCE' && parcelIds[t.parcel]) {
+      await prisma.parcelEvent.create({
+        data: {
+          parcelId: parcelIds[t.parcel],
+          label: 'Relance colis',
+          comment: t.description,
+          actorId: userIds[t.by],
+          createdAt: daysAgo(t.daysAgo),
+        },
+      });
+    }
+    void ticket;
   }
 
   for (const pay of PAYMENTS) {
@@ -717,8 +765,55 @@ async function main() {
     },
   });
 
+  const returnLotCodes = ['UMB-RET-001', 'UMB-RET-002', 'UMB-RET-003'] as const;
+  const returnLot = await prisma.returnLot.create({
+    data: {
+      code: 'UMB-LOT-DEMO1',
+      senderId: userIds.expediteur,
+      items: {
+        create: returnLotCodes.map((code, sortOrder) => ({
+          parcelId: parcelIds[code],
+          sortOrder,
+        })),
+      },
+    },
+  });
+
+  const attenteCodes = ['UMB-ATT-001', 'UMB-ATT-002'] as const;
+  const attenteManifest = await prisma.pickupManifest.create({
+    data: {
+      code: 'UMB-MAT-DEMO1',
+      kind: 'EN_ATTENTE',
+      createdById: userIds.expediteur,
+      senderId: userIds.expediteur,
+      items: {
+        create: attenteCodes.map((code, sortOrder) => ({
+          parcelId: parcelIds[code],
+          sortOrder,
+        })),
+      },
+    },
+  });
+
+  const preEnlevementManifest = await prisma.pickupManifest.create({
+    data: {
+      code: 'UMB-MPR-DEMO1',
+      kind: 'PRE_ENLEVEMENT',
+      createdById: userIds.pickup,
+      senderId: userIds.expediteur,
+      items: {
+        create: [
+          {
+            parcelId: parcelIds['UMB-ENL-001'],
+            sortOrder: 0,
+          },
+        ],
+      },
+    },
+  });
+
   console.log(
-    `Seeded ${USERS.length} users, ${AGENCIES.length} agencies, ${ZONES.length} zones, ${PARCELS.length} parcels, ${TICKETS.length} tickets, ${PAYMENTS.length} payments, ${DEFAULT_STATUS_CATEGORIES.length} status categories, conversation #${conversation.id} (livreur↔client).`,
+    `Seeded ${USERS.length} users, ${AGENCIES.length} agencies, ${ZONES.length} zones, ${PARCELS.length} parcels, ${TICKETS.length} tickets, ${PAYMENTS.length} payments, ${DEFAULT_STATUS_CATEGORIES.length} status categories, conversation #${conversation.id} (livreur↔client), return lot ${returnLot.code}, manifests ${attenteManifest.code} / ${preEnlevementManifest.code}.`,
   );
   for (const u of USERS) console.log(`  ${u.email.padEnd(26)} ${u.password}`);
 }

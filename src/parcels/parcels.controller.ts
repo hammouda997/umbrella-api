@@ -113,7 +113,13 @@ export class ParcelsController {
 
   @ApiBearerAuth()
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CHEF_AGENCE, Role.EXPEDITEUR)
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.ADMIN,
+    Role.CHEF_AGENCE,
+    Role.EXPEDITEUR,
+    Role.CLIENT,
+  )
   @Patch(':id')
   update(
     @CurrentUser() user: { id: number; role: Role; email: string },
