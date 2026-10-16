@@ -14,7 +14,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/auth.decorators';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { CreatePickupManifestDto } from './dto/pickup-manifest.dto';
+import {
+  ClosePickupManifestDto,
+  CreatePickupManifestDto,
+} from './dto/pickup-manifest.dto';
 import { PickupManifestsService } from './pickup-manifests.service';
 
 const READ_ROLES = [
@@ -78,5 +81,16 @@ export class PickupManifestsController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.manifests.findOne(user, id);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...CREATE_ROLES)
+  @Post(':id/close')
+  close(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ClosePickupManifestDto,
+  ) {
+    return this.manifests.close(user, id, dto);
   }
 }

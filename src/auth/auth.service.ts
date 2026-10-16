@@ -3,19 +3,27 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'crypto';
 import { ApprovalStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ZonesService } from '../zones/zones.service';
-import { PUBLIC_SIGNUP_ROLES, SignInDto, SignUpDto } from './dto/auth.dto';
+import {
+  ForgotPasswordDto,
+  PUBLIC_SIGNUP_ROLES,
+  ResetPasswordDto,
+  SignInDto,
+  SignUpDto,
+} from './dto/auth.dto';
 
 export const PORTAL_BY_ROLE: Record<Role, string> = {
   SUPER_ADMIN: '/super-admin',
   ADMIN: '/admin',
+  EXPERT_COMPTABLE: '/expert-comptable',
   CHEF_AGENCE: '/chef-agence',
   SUPPORT: '/support',
   PICKUP: '/pickup',
@@ -39,21 +47,23 @@ type PublicUser = {
   phone: string | null;
   agencyId: number | null;
   approvalStatus?: ApprovalStatus;
+  productTypes?: string[];
 };
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly zones: ZonesService,
   ) {}
 
   async signup(dto: SignUpDto) {
     if (!PUBLIC_SIGNUP_ROLES.includes(dto.role)) {
       throw new BadRequestException(
-        'Public signup allows EXPEDITEUR or LIVREUR only',
+        'Public signup allows EXPEDITEUR only',
       );
     }
 
@@ -96,11 +106,6 @@ export class AuthService {
     });
     if (existing) throw new ConflictException('Email already registered');
 
-    let zoneId: number | null = null;
-    if (dto.role === Role.LIVREUR) {
-      zoneId = await this.zones.ensureZoneForGovernorate(governorate);
-    }
-
     const password = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
       data: {
@@ -108,7 +113,7 @@ export class AuthService {
         email: dto.email.toLowerCase(),
         phone,
         password,
-        role: dto.role,
+        role: Role.EXPEDITEUR,
         approvalStatus: ApprovalStatus.PENDING,
         governorate,
         city,
@@ -116,7 +121,6 @@ export class AuthService {
         shopName,
         productTypes,
         productNotes,
-        zoneId,
       },
       select: {
         id: true,
@@ -183,6 +187,7 @@ export class AuthService {
       phone: user.phone,
       agencyId: user.agencyId,
       approvalStatus: user.approvalStatus,
+      productTypes: user.productTypes ?? [],
     };
     const tokens = await this.issueTokens(
       user.id,
@@ -268,6 +273,7 @@ export class AuthService {
         phone: user.phone,
         agencyId: user.agencyId,
         approvalStatus: user.approvalStatus,
+        productTypes: user.productTypes ?? [],
       },
       portal: PORTAL_BY_ROLE[user.role],
       ...tokens,
@@ -279,6 +285,79 @@ export class AuthService {
       where: { id: userId },
       data: { refreshToken: null },
     });
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const email = dto.email.toLowerCase().trim();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const generic = {
+      ok: true as const,
+      message:
+        'Si un compte existe pour cet email, un lien de réinitialisation a été préparé.',
+    };
+
+    if (!user || !user.isActive) {
+      this.logger.log(`forgot-password no-op email=${email}`);
+      return generic;
+    }
+
+    const rawToken = randomBytes(32).toString('hex');
+    const hashed = createHash('sha256').update(rawToken).digest('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: hashed,
+        passwordResetExpires: expires,
+      },
+    });
+
+    this.logger.log(
+      `forgot-password email=${email} inbox=${this.config.get('CONTACT_INBOX') ?? 'unset'} expires=${expires.toISOString()}`,
+    );
+
+    const isProd =
+      this.config.get<string>('NODE_ENV')?.toLowerCase() === 'production';
+    if (!isProd) {
+      return {
+        ...generic,
+        /** Dev only — never returned in production. */
+        resetToken: rawToken,
+      };
+    }
+    return generic;
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const hashed = createHash('sha256').update(dto.token.trim()).digest('hex');
+    const user = await this.prisma.user.findFirst({
+      where: {
+        passwordResetToken: hashed,
+        passwordResetExpires: { gt: new Date() },
+        isActive: true,
+      },
+    });
+    if (!user) {
+      throw new BadRequestException(
+        'Lien de réinitialisation invalide ou expiré',
+      );
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: await bcrypt.hash(dto.password, 12),
+        passwordResetToken: null,
+        passwordResetExpires: null,
+        refreshToken: null,
+      },
+    });
+
+    return {
+      ok: true as const,
+      message: 'Mot de passe mis à jour — vous pouvez vous connecter.',
+    };
   }
 
   private async issueTokens(

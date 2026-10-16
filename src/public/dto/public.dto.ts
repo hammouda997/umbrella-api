@@ -8,12 +8,6 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class ForgotPasswordDto {
-  @ApiProperty()
-  @IsEmail()
-  email!: string;
-}
-
 export class ContactLeadDto {
   @ApiProperty()
   @IsString()

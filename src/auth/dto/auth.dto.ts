@@ -14,7 +14,7 @@ import { Role } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /** Public self-registration only */
-export const PUBLIC_SIGNUP_ROLES: Role[] = [Role.EXPEDITEUR, Role.LIVREUR];
+export const PUBLIC_SIGNUP_ROLES: Role[] = [Role.EXPEDITEUR];
 
 export class SignUpDto {
   @ApiProperty()
@@ -101,4 +101,28 @@ export class RefreshTokenDto {
   @ApiProperty()
   @IsString()
   refreshToken!: string;
+}
+
+export class ForgotPasswordDto {
+  @ApiProperty()
+  @IsEmail()
+  @MaxLength(120)
+  email!: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty()
+  @IsString()
+  @MinLength(20)
+  @MaxLength(200)
+  token!: string;
+
+  @ApiProperty({ description: 'Min 8 chars, at least one letter and one digit' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  @Matches(/^(?=.*[A-Za-z])(?=.*\d).{8,}$/, {
+    message: 'Password must include at least one letter and one digit',
+  })
+  password!: string;
 }

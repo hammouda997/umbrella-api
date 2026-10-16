@@ -6,47 +6,74 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/auth.decorators';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PaymentsService } from './payments.service';
 import {
   CreatePaymentRequestDto,
   UpdatePaymentStatusDto,
 } from './dto/payment.dto';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/auth.decorators';
-import { RolesGuard } from '../common/guards/roles.guard';
+
+const STAFF = [
+  Role.SUPER_ADMIN,
+  Role.ADMIN,
+  Role.EXPERT_COMPTABLE,
+  Role.CHEF_AGENCE,
+  Role.FINANCE,
+] as const;
 
 @ApiTags('payments')
 @ApiBearerAuth()
+@UseGuards(RolesGuard)
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
 
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.EXPEDITEUR)
+  @Roles(...STAFF, Role.EXPEDITEUR)
+  @Get()
+  list(@CurrentUser() user: AuthUser) {
+    return this.payments.list(user);
+  }
+
+  @Roles(...STAFF)
+  @Get('budget-status')
+  budget(@CurrentUser() user: AuthUser) {
+    return this.payments.budgetStatus(user);
+  }
+
+  @Roles(Role.EXPERT_COMPTABLE, Role.SUPER_ADMIN, Role.ADMIN)
+  @Post('expert-batch')
+  expertBatch(
+    @CurrentUser() user: AuthUser,
+    @Query('agencyId') agencyId?: string,
+  ) {
+    const id = agencyId ? Number(agencyId) : undefined;
+    return this.payments.expertBatchPay(
+      user,
+      id != null && Number.isFinite(id) ? id : undefined,
+    );
+  }
+
+  @Roles(...STAFF, Role.EXPEDITEUR)
   @Post()
   create(
-    @CurrentUser() user: { id: number; role: Role; email: string },
+    @CurrentUser() user: AuthUser,
     @Body() dto: CreatePaymentRequestDto,
   ) {
     return this.payments.create(user, dto);
   }
 
-  @Get()
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.FINANCE, Role.EXPEDITEUR)
-  list(@CurrentUser() user: { id: number; role: Role; email: string }) {
-    return this.payments.list(user);
-  }
-
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.FINANCE)
+  @Roles(...STAFF)
   @Patch(':id/status')
   updateStatus(
-    @CurrentUser() user: { id: number; role: Role; email: string },
+    @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePaymentStatusDto,
   ) {

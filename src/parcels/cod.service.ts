@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ParcelStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CashService } from '../cash/cash.service';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 
 const DELIVERED: ParcelStatus[] = [
@@ -10,7 +11,10 @@ const DELIVERED: ParcelStatus[] = [
 
 @Injectable()
 export class CodService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cash: CashService,
+  ) {}
 
   async list() {
     const rows = await this.prisma.parcel.findMany({
@@ -56,10 +60,15 @@ export class CodService {
         status: { in: DELIVERED },
         codSettledAt: null,
       },
-      select: { id: true },
+      select: { id: true, price: true, driverId: true },
     });
     const ids = eligible.map((p) => p.id);
     if (ids.length === 0) return { settled: 0 };
+
+    const amount =
+      Math.round(eligible.reduce((s, p) => s + Number(p.price), 0) * 1000) /
+      1000;
+    const livreurId = eligible.find((p) => p.driverId)?.driverId ?? null;
 
     const now = new Date();
     await this.prisma.$transaction([
@@ -76,6 +85,14 @@ export class CodService {
         })),
       }),
     ]);
-    return { settled: ids.length };
+
+    await this.cash.creditCodSettlement({
+      actorId: user.id,
+      amount,
+      parcelIds: ids,
+      livreurId,
+    });
+
+    return { settled: ids.length, amount };
   }
 }

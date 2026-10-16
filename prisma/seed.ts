@@ -36,6 +36,7 @@ type UserKey =
   | 'support'
   | 'pickup'
   | 'magasinier'
+  | 'expert'
   | 'finance';
 type ZoneKey = 'tunis' | 'sahel' | 'sfax';
 type AgencyKey = 'tunis' | 'sousse' | 'sfax';
@@ -145,12 +146,21 @@ const USERS: SeedUser[] = [
     agency: 'tunis',
   },
   {
+    key: 'expert',
+    name: 'Expert Comptable',
+    email: 'expert@umbrella.tn',
+    role: Role.EXPERT_COMPTABLE,
+    phone: '24000000',
+    password: 'Expert@12345',
+  },
+  {
     key: 'finance',
-    name: 'Finance Umbrella',
+    name: 'Responsable Finance Tunis',
     email: 'finance@umbrella.tn',
     role: Role.FINANCE,
     phone: '24000001',
     password: 'Finance@12345',
+    agency: 'tunis',
   },
 ];
 

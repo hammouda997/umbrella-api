@@ -764,7 +764,7 @@ export class ParcelsService {
         updatedAt: true,
         events: {
           orderBy: { createdAt: 'asc' },
-          select: { label: true, createdAt: true },
+          select: { label: true, status: true, createdAt: true },
         },
       },
     });
@@ -776,9 +776,35 @@ export class ParcelsService {
         ? `${name[0] ?? '*'}*`
         : `${name.slice(0, 1)}${'*'.repeat(Math.min(name.length - 1, 6))}`;
 
-    const timeline = parcel.events.length
-      ? parcel.events.map((e) => ({ at: e.createdAt, label: e.label }))
-      : [{ at: parcel.createdAt, label: 'Colis créé' }];
+    let timeline = parcel.events.length
+      ? parcel.events.map((e) => ({
+          at: e.createdAt,
+          label: e.label,
+          status: e.status,
+        }))
+      : [
+          {
+            at: parcel.createdAt,
+            label: 'Colis créé',
+            status: ParcelStatus.EN_ATTENTE as ParcelStatus | null,
+          },
+        ];
+
+    const hasLivres = timeline.some(
+      (e) =>
+        e.status === ParcelStatus.LIVRES ||
+        e.label === PARCEL_STATUS_LABEL[ParcelStatus.LIVRES],
+    );
+    if (parcel.status === ParcelStatus.LIVRES && !hasLivres) {
+      timeline = [
+        ...timeline,
+        {
+          at: parcel.updatedAt,
+          label: PARCEL_STATUS_LABEL[ParcelStatus.LIVRES],
+          status: ParcelStatus.LIVRES,
+        },
+      ];
+    }
 
     return {
       code: parcel.code,

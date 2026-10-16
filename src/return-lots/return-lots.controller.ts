@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -13,7 +14,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/auth.decorators';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { CreateReturnLotDto } from './dto/return-lot.dto';
+import {
+  CreateReturnLotDto,
+  UpdateReturnLotDestinationDto,
+} from './dto/return-lot.dto';
 import { ReturnLotsService } from './return-lots.service';
 
 @ApiTags('return-lots')
@@ -27,6 +31,23 @@ export class ReturnLotsController {
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateReturnLotDto) {
     return this.lots.create(user, dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(
+    Role.EXPEDITEUR,
+    Role.SUPER_ADMIN,
+    Role.ADMIN,
+    Role.CHEF_AGENCE,
+    Role.MAGASINIER,
+  )
+  @Patch(':id/destination')
+  updateDestination(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateReturnLotDestinationDto,
+  ) {
+    return this.lots.updateDestination(user, id, dto);
   }
 
   @UseGuards(RolesGuard)

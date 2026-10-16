@@ -1,7 +1,11 @@
 import { Role } from '@prisma/client';
 
 /** Global ops staff — no agency filter. */
-export const GLOBAL_STAFF: Role[] = [Role.SUPER_ADMIN, Role.ADMIN];
+export const GLOBAL_STAFF: Role[] = [
+  Role.SUPER_ADMIN,
+  Role.ADMIN,
+  Role.EXPERT_COMPTABLE,
+];
 
 /** Agency-scoped staff roles (gouvernorat Agency, not livreur Zone). */
 export const AGENCY_ROLES: Role[] = [
@@ -9,6 +13,7 @@ export const AGENCY_ROLES: Role[] = [
   Role.SUPPORT,
   Role.PICKUP,
   Role.MAGASINIER,
+  Role.FINANCE,
 ];
 
 /** Roles that require agencyId on the user. */

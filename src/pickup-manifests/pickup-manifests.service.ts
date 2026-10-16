@@ -17,7 +17,10 @@ import {
   PARCEL_LIST_INCLUDE,
   toParcelListView,
 } from '../parcels/parcel-view';
-import { CreatePickupManifestDto } from './dto/pickup-manifest.dto';
+import {
+  ClosePickupManifestDto,
+  CreatePickupManifestDto,
+} from './dto/pickup-manifest.dto';
 
 const MAX_MANIFEST_SIZE = 20;
 
@@ -98,6 +101,8 @@ export class PickupManifestsService {
       sender: manifest.sender,
       createdById: manifest.createdById,
       createdBy: manifest.createdBy,
+      dechargeUrl: manifest.dechargeUrl,
+      cinUrl: manifest.cinUrl,
       itemCount: parcels.length,
       closedAt: manifest.closedAt,
       createdAt: manifest.createdAt,
@@ -271,5 +276,41 @@ export class PickupManifestsService {
     }>,
   ) {
     return this.toView(manifest);
+  }
+
+  async close(user: AuthUser, id: number, dto: ClosePickupManifestDto) {
+    if (!OPS_CREATE.includes(user.role)) {
+      throw new ForbiddenException();
+    }
+    const manifest = await this.prisma.pickupManifest.findUnique({
+      where: { id },
+      include: MANIFEST_INCLUDE,
+    });
+    if (!manifest) throw new NotFoundException('Manifeste introuvable');
+    if (!this.canRead(user, manifest.senderId, manifest.createdById)) {
+      throw new ForbiddenException();
+    }
+    if (manifest.status !== PickupManifestStatus.OPEN) {
+      throw new BadRequestException('Manifeste déjà clôturé');
+    }
+    if (user.role === Role.PICKUP) {
+      if (!dto.dechargeUrl?.trim() || !dto.cinUrl?.trim()) {
+        throw new BadRequestException(
+          'Décharge cachetée et CIN obligatoires pour clôturer',
+        );
+      }
+    }
+
+    const updated = await this.prisma.pickupManifest.update({
+      where: { id },
+      data: {
+        status: PickupManifestStatus.CLOSED,
+        closedAt: new Date(),
+        dechargeUrl: dto.dechargeUrl.trim(),
+        cinUrl: dto.cinUrl.trim(),
+      },
+      include: MANIFEST_INCLUDE,
+    });
+    return this.toView(updated);
   }
 }

@@ -12,12 +12,16 @@ import {
   PARCEL_LIST_INCLUDE,
   toParcelListView,
 } from '../parcels/parcel-view';
-import { CreateReturnLotDto } from './dto/return-lot.dto';
+import {
+  CreateReturnLotDto,
+  UpdateReturnLotDestinationDto,
+} from './dto/return-lot.dto';
 
 const MAX_LOT_SIZE = 20;
 
 const LOT_INCLUDE = {
   sender: { select: { id: true, name: true, email: true } },
+  destinationAgency: { select: { id: true, name: true, governorate: true } },
   items: {
     orderBy: { sortOrder: 'asc' as const },
     include: {
@@ -66,6 +70,10 @@ export class ReturnLotsService {
       status: lot.status,
       senderId: lot.senderId,
       sender: lot.sender,
+      destinationLabel: lot.destinationLabel,
+      destinationAgencyId: lot.destinationAgencyId,
+      destinationAgency: lot.destinationAgency,
+      colisCount: parcels.length,
       itemCount: parcels.length,
       closedAt: lot.closedAt,
       createdAt: lot.createdAt,
@@ -122,10 +130,19 @@ export class ReturnLotsService {
       code = this.generateCode();
     }
 
+    if (dto.destinationAgencyId) {
+      const agency = await this.prisma.agency.findUnique({
+        where: { id: dto.destinationAgencyId },
+      });
+      if (!agency) throw new BadRequestException('Agence destination introuvable');
+    }
+
     const created = await this.prisma.returnLot.create({
       data: {
         code,
         senderId: user.id,
+        destinationLabel: dto.destinationLabel?.trim() || null,
+        destinationAgencyId: dto.destinationAgencyId ?? null,
         items: {
           create: parcelIds.map((parcelId, sortOrder) => ({
             parcelId,
@@ -137,6 +154,47 @@ export class ReturnLotsService {
     });
 
     return this.toLotView(created);
+  }
+
+  async updateDestination(
+    user: AuthUser,
+    id: number,
+    dto: UpdateReturnLotDestinationDto,
+  ) {
+    const ops: Role[] = [
+      Role.SUPER_ADMIN,
+      Role.ADMIN,
+      Role.CHEF_AGENCE,
+      Role.MAGASINIER,
+      Role.EXPEDITEUR,
+    ];
+    if (!ops.includes(user.role)) throw new ForbiddenException();
+
+    const lot = await this.prisma.returnLot.findUnique({ where: { id } });
+    if (!lot) throw new NotFoundException('Lot introuvable');
+    if (user.role === Role.EXPEDITEUR && lot.senderId !== user.id) {
+      throw new ForbiddenException();
+    }
+    if (dto.destinationAgencyId) {
+      const agency = await this.prisma.agency.findUnique({
+        where: { id: dto.destinationAgencyId },
+      });
+      if (!agency) throw new BadRequestException('Agence destination introuvable');
+    }
+
+    const updated = await this.prisma.returnLot.update({
+      where: { id },
+      data: {
+        ...(dto.destinationLabel !== undefined
+          ? { destinationLabel: dto.destinationLabel?.trim() || null }
+          : {}),
+        ...(dto.destinationAgencyId !== undefined
+          ? { destinationAgencyId: dto.destinationAgencyId }
+          : {}),
+      },
+      include: LOT_INCLUDE,
+    });
+    return this.toLotView(updated);
   }
 
   async list(user: AuthUser) {

@@ -20,6 +20,8 @@ import { ReturnLotsModule } from './return-lots/return-lots.module';
 import { PickupManifestsModule } from './pickup-manifests/pickup-manifests.module';
 import { SupportBotModule } from './support-bot/support-bot.module';
 import { SmsModule } from './sms/sms.module';
+import { CashModule } from './cash/cash.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { HealthController } from './health/health.controller';
 
@@ -33,6 +35,8 @@ import { HealthController } from './health/health.controller';
     NavexModule,
     UsersModule,
     ParcelsModule,
+    CashModule,
+    UploadsModule,
     TicketsModule,
     PaymentsModule,
     ReturnLotsModule,

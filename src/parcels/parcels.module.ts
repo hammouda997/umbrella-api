@@ -5,9 +5,10 @@ import { CodService } from './cod.service';
 import { CodController } from './cod.controller';
 import { NavexModule } from '../navex/navex.module';
 import { DeliveryRoutesModule } from '../delivery-routes/delivery-routes.module';
+import { CashModule } from '../cash/cash.module';
 
 @Module({
-  imports: [NavexModule, DeliveryRoutesModule],
+  imports: [NavexModule, DeliveryRoutesModule, CashModule],
   controllers: [ParcelsController, CodController],
   providers: [ParcelsService, CodService],
   exports: [ParcelsService],

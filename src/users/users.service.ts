@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
@@ -13,6 +14,7 @@ import {
   AGENCY_REQUIRED_ROLES,
   isAgencyRole,
 } from '../common/agency-roles';
+import { SmsService } from '../sms/sms.service';
 import {
   ChangePasswordDto,
   CreateUserDto,
@@ -25,6 +27,8 @@ const ADMIN_CREATABLE: Role[] = [
   Role.LIVREUR,
   Role.CLIENT,
   Role.ADMIN,
+  Role.EXPERT_COMPTABLE,
+  Role.CHEF_AGENCE,
   Role.FINANCE,
   Role.SUPPORT,
   Role.PICKUP,
@@ -55,7 +59,12 @@ const PUBLIC_USER_SELECT = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sms: SmsService,
+  ) {}
 
   async list(actor: AuthUser) {
     const where =
@@ -249,7 +258,7 @@ export class UsersService {
       throw new ForbiddenException();
     }
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: {
         approvalStatus: status,
@@ -258,6 +267,25 @@ export class UsersService {
       },
       select: PUBLIC_USER_SELECT,
     });
+
+    const verdict =
+      status === ApprovalStatus.APPROVED ? 'approuvé' : 'refusé';
+    this.logger.log(
+      `approval ${verdict} userId=${updated.id} email=${updated.email} by=${actor.id}`,
+    );
+    if (updated.phone) {
+      const body =
+        status === ApprovalStatus.APPROVED
+          ? `Umbrella Express : votre compte expéditeur est approuvé. Connectez-vous sur l’espace Expéditeur.`
+          : `Umbrella Express : votre demande de compte a été refusée. Contactez le support.`;
+      void this.sms
+        .send(updated.phone, body)
+        .catch((err) =>
+          this.logger.warn(`Approval SMS failed: ${String(err)}`),
+        );
+    }
+
+    return updated;
   }
 
   async updateProfile(actor: AuthUser, dto: UpdateProfileDto) {
@@ -269,9 +297,23 @@ export class UsersService {
       });
       if (taken) throw new ConflictException('Email already registered');
     }
+    const productTypes = dto.productTypes
+      ?.map((t) => t.trim())
+      .filter((t) => t.length >= 2 && t.length <= 80)
+      .filter(
+        (t, i, all) =>
+          all.findIndex(
+            (x) => x.localeCompare(t, 'fr', { sensitivity: 'base' }) === 0,
+          ) === i,
+      );
     return this.prisma.user.update({
       where: { id: actor.id },
-      data: { name: dto.name, email, phone: dto.phone },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(email !== undefined ? { email } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+        ...(productTypes !== undefined ? { productTypes } : {}),
+      },
       select: PUBLIC_USER_SELECT,
     });
   }

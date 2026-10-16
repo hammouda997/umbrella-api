@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
@@ -63,6 +64,16 @@ export class UpdateProfileDto {
   @IsOptional()
   @Matches(/^[0-9]{8}$/, { message: 'phone must be 8 digits' })
   phone?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Saved product type labels for the sender account',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  productTypes?: string[];
 }
 
 export class ChangePasswordDto {

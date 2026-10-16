@@ -10,6 +10,7 @@ datasource db {
 enum Role {
   SUPER_ADMIN
   ADMIN
+  EXPERT_COMPTABLE
   CHEF_AGENCE
   SUPPORT
   PICKUP
@@ -18,6 +19,17 @@ enum Role {
   EXPEDITEUR
   LIVREUR
   CLIENT
+}
+
+/** Caisse dépense (agency) vs caisse COD (globale livreurs). */
+enum CashRegisterKind {
+  DEPENSE
+  COD
+}
+
+enum CashMovementType {
+  IN
+  OUT
 }
 
 enum DeliveryMode {
@@ -79,6 +91,8 @@ model User {
   productTypes     String[]         @default([])
   productNotes     String?
   refreshToken     String?
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
   isActive         Boolean          @default(true)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
@@ -96,6 +110,9 @@ model User {
   returnLots       ReturnLot[]
   pickupManifestsCreated PickupManifest[] @relation("PickupManifestCreator")
   pickupManifestsAsSender PickupManifest[] @relation("PickupManifestSender")
+  cashMovements    CashMovement[]
+  livreurDeposits  LivreurDeposit[] @relation("LivreurDeposits")
+  depositsReviewed LivreurDeposit[] @relation("DepositReviewer")
 
   @@index([agencyId])
   @@index([zoneId])
@@ -104,14 +121,95 @@ model User {
 
 /** Gouvernorat agency — separate from livreur fleet Zone. */
 model Agency {
-  id          Int      @id @default(autoincrement())
-  name        String
-  governorate String   @unique
-  isActive    Boolean  @default(true)
-  users       User[]
-  parcels     Parcel[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                    Int       @id @default(autoincrement())
+  name                  String
+  governorate           String    @unique
+  isActive              Boolean   @default(true)
+  expertBatchDeadlineAt DateTime?
+  users                 User[]
+  parcels               Parcel[]
+  cashRegisters         CashRegister[]
+  livreurDeposits       LivreurDeposit[]
+  returnLots            ReturnLot[]
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+enum LivreurDepositStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+/** Versement COD livreur avec photo du reçu — accepté seulement si solde float = 0. */
+model LivreurDeposit {
+  id                 Int                  @id @default(autoincrement())
+  livreurId          Int
+  livreur            User                 @relation("LivreurDeposits", fields: [livreurId], references: [id], onDelete: Cascade)
+  agencyId           Int?
+  agency             Agency?              @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  amount             Decimal              @db.Decimal(14, 3)
+  expectedAmount     Decimal              @db.Decimal(14, 3)
+  receiptUrl         String
+  status             LivreurDepositStatus @default(PENDING)
+  runsheetParcelIds  Int[]                @default([])
+  rejectReason       String?
+  reviewedById       Int?
+  reviewedBy         User?                @relation("DepositReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  movements          CashMovement[]
+
+  @@index([livreurId, status])
+  @@index([agencyId, status])
+  @@index([status, createdAt])
+}
+
+/**
+ * Two cash boxes:
+ * - DEPENSE: agency operating expenses (agencyId required)
+ * - COD: global livreur COD intake (agencyId null = réseau)
+ */
+model CashRegister {
+  id        Int              @id @default(autoincrement())
+  kind      CashRegisterKind
+  name      String
+  agencyId  Int?
+  agency    Agency?          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  balance   Decimal          @default(0) @db.Decimal(14, 3)
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  movements CashMovement[]
+
+  @@unique([kind, agencyId])
+  @@index([kind])
+  @@index([agencyId])
+}
+
+model CashMovement {
+  id          Int              @id @default(autoincrement())
+  registerId  Int
+  register    CashRegister     @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  type        CashMovementType
+  amount      Decimal          @db.Decimal(14, 3)
+  label       String
+  note        String?
+  receiptUrl  String?
+  invoiceRef  String?
+  depositId   Int?
+  deposit     LivreurDeposit?  @relation(fields: [depositId], references: [id], onDelete: SetNull)
+  actorId     Int?
+  actor       User?            @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  parcelId    Int?
+  livreurId   Int?
+  createdAt   DateTime         @default(now())
+
+  @@index([registerId, createdAt])
+  @@index([actorId])
+  @@index([livreurId])
+  @@index([depositId])
 }
 
 /**
@@ -209,19 +307,23 @@ enum ReturnLotStatus {
 }
 
 model ReturnLot {
-  id        Int             @id @default(autoincrement())
-  code      String          @unique
-  senderId  Int
-  sender    User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  status    ReturnLotStatus @default(OPEN)
-  closedAt  DateTime?
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  items     ReturnLotItem[]
+  id                   Int             @id @default(autoincrement())
+  code                 String          @unique
+  senderId             Int
+  sender               User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  destinationLabel     String?
+  destinationAgencyId  Int?
+  destinationAgency    Agency?         @relation(fields: [destinationAgencyId], references: [id], onDelete: SetNull)
+  status               ReturnLotStatus @default(OPEN)
+  closedAt             DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  items                ReturnLotItem[]
 
   @@index([senderId])
   @@index([status])
   @@index([code])
+  @@index([destinationAgencyId])
 }
 
 model ReturnLotItem {
@@ -255,6 +357,8 @@ model PickupManifest {
   createdBy   User                 @relation("PickupManifestCreator", fields: [createdById], references: [id], onDelete: Cascade)
   senderId    Int?
   sender      User?                @relation("PickupManifestSender", fields: [senderId], references: [id], onDelete: SetNull)
+  dechargeUrl String?
+  cinUrl      String?
   closedAt    DateTime?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
@@ -327,21 +431,26 @@ model Ticket {
 
 enum PaymentRequestStatus {
   EN_DEMANDE
+  VALIDE_FINANCE
+  VALIDE_CHEF
+  VALIDE_EXPERT
   APPROUVE
   PAYE
   REJETE
 }
 
 model PaymentRequest {
-  id          Int                  @id @default(autoincrement())
-  amount      Decimal              @db.Decimal(12, 3)
-  status      PaymentRequestStatus @default(EN_DEMANDE)
-  note        String?
-  senderId    Int
-  sender      User                 @relation(fields: [senderId], references: [id])
-  items       PaymentItem[]
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  id            Int                  @id @default(autoincrement())
+  amount        Decimal              @db.Decimal(12, 3)
+  status        PaymentRequestStatus @default(EN_DEMANDE)
+  note          String?
+  /** [{ at, status, label, actorName? }] */
+  statusHistory Json?
+  senderId      Int
+  sender        User                 @relation(fields: [senderId], references: [id])
+  items         PaymentItem[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
   @@index([senderId])
   @@index([status])
