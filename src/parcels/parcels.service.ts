@@ -583,6 +583,17 @@ export class ParcelsService {
 
   async softDelete(user: AuthUser, id: number) {
     const parcel = await this.getOwnedOrStaff(user, id);
+    if (parcel.status === ParcelStatus.SUPPRIME) {
+      throw new BadRequestException('Parcel already deleted');
+    }
+    if (
+      user.role === Role.EXPEDITEUR &&
+      !SENDER_EDITABLE.includes(parcel.status)
+    ) {
+      throw new ForbiddenException(
+        'Seuls les colis en attente peuvent être annulés',
+      );
+    }
     if (
       parcel.mode === DeliveryMode.EXTERNAL &&
       parcel.code &&
@@ -603,7 +614,10 @@ export class ParcelsService {
       });
       await this.recordEvent(tx, {
         parcelId: id,
-        label: 'Colis supprimé',
+        label:
+          user.role === Role.EXPEDITEUR
+            ? 'Colis annulé (expéditeur)'
+            : 'Colis supprimé',
         status: ParcelStatus.SUPPRIME,
         actorId: user.id,
       });
