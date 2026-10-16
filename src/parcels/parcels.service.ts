@@ -109,6 +109,8 @@ export class ParcelsService {
       articleCount: dto.articleCount,
       parcelCount: dto.parcelCount,
       designation: dto.designation,
+      color: dto.color,
+      size: dto.size,
       notes: dto.notes,
       paymentMode: dto.paymentMode,
       allowOpen: dto.allowOpen,
@@ -125,6 +127,10 @@ export class ParcelsService {
       liabilityAcceptedAt:
         dto.liabilityAcceptedAt !== undefined
           ? new Date(dto.liabilityAcceptedAt)
+          : undefined,
+      contentDeclarationAcceptedAt:
+        dto.contentDeclarationAcceptedAt !== undefined
+          ? new Date(dto.contentDeclarationAcceptedAt)
           : undefined,
     };
   }
@@ -201,7 +207,12 @@ export class ParcelsService {
       adresse: dto.address,
       prix: dto.price,
       nb_article: dto.articleCount ?? 1,
-      msg: [dto.notes, dto.isFragile ? 'FRAGILE' : null]
+      msg: [
+        dto.notes,
+        dto.color ? `Couleur: ${dto.color}` : null,
+        dto.size ? `Taille: ${dto.size}` : null,
+        dto.isFragile ? 'FRAGILE' : null,
+      ]
         .filter(Boolean)
         .join(' · '),
       designation: dto.designation ?? '',
@@ -221,10 +232,98 @@ export class ParcelsService {
     };
   }
 
+  async lookupRecipientByPhone(user: AuthUser, phoneRaw: string) {
+    if (!SENDER_ROLES.includes(user.role)) {
+      throw new ForbiddenException(
+        'Only staff or expéditeur can look up recipients',
+      );
+    }
+    const phone = this.normalizePhone(phoneRaw);
+    if (!/^[0-9]{8}$/.test(phone)) {
+      throw new BadRequestException('Téléphone : 8 chiffres requis');
+    }
+
+    const [client, lastParcel] = await Promise.all([
+      this.prisma.user.findFirst({
+        where: {
+          role: Role.CLIENT,
+          phone,
+          isActive: true,
+          approvalStatus: ApprovalStatus.APPROVED,
+        },
+        select: {
+          name: true,
+          phone: true,
+          governorate: true,
+          city: true,
+          address: true,
+        },
+      }),
+      this.prisma.parcel.findFirst({
+        where: { phone, ...NOT_DELETED },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          recipientName: true,
+          phone: true,
+          governorate: true,
+          city: true,
+          locality: true,
+          address: true,
+          lat: true,
+          lng: true,
+        },
+      }),
+    ]);
+
+    if (!client && !lastParcel) {
+      return { found: false as const, phone };
+    }
+
+    const useParcelAddress = Boolean(lastParcel?.address?.trim());
+    const governorate = useParcelAddress
+      ? lastParcel!.governorate
+      : (client?.governorate ?? lastParcel?.governorate ?? null);
+    const city = useParcelAddress
+      ? lastParcel!.city
+      : (client?.city ?? lastParcel?.city ?? null);
+    const address = useParcelAddress
+      ? lastParcel!.address
+      : (client?.address ?? lastParcel?.address ?? null);
+    const locality = lastParcel?.locality ?? null;
+    const name =
+      lastParcel?.recipientName?.trim() ||
+      client?.name?.trim() ||
+      null;
+
+    return {
+      found: true as const,
+      phone,
+      name,
+      governorate,
+      city,
+      locality,
+      address,
+      lat: lastParcel?.lat ?? null,
+      lng: lastParcel?.lng ?? null,
+      source: useParcelAddress
+        ? ('parcel' as const)
+        : client
+          ? ('client' as const)
+          : ('parcel' as const),
+      hasAccount: Boolean(client),
+    };
+  }
+
   async create(user: AuthUser, dto: CreateParcelDto) {
     if (!SENDER_ROLES.includes(user.role)) {
       throw new ForbiddenException(
         'Only staff or expéditeur can create parcels',
+      );
+    }
+
+    if (!dto.contentDeclarationAcceptedAt) {
+      throw new BadRequestException(
+        'Déclaration obligatoire : contenu léger, conforme à la législation tunisienne, responsabilité exclusive de l’expéditeur',
       );
     }
 

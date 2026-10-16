@@ -83,6 +83,17 @@ export class ParcelsController {
   }
 
   @ApiBearerAuth()
+  @UseGuards(RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CHEF_AGENCE, Role.EXPEDITEUR)
+  @Get('recipient-by-phone/:phone')
+  lookupRecipientByPhone(
+    @CurrentUser() user: { id: number; role: Role; email: string },
+    @Param('phone') phone: string,
+  ) {
+    return this.parcels.lookupRecipientByPhone(user, phone);
+  }
+
+  @ApiBearerAuth()
   @Get(':id')
   findOne(
     @CurrentUser() user: { id: number; role: Role; email: string },

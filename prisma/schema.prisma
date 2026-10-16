@@ -255,6 +255,8 @@ model Parcel {
   articleCount  Int           @default(1)
   parcelCount   Int           @default(1)
   designation   String?
+  color         String?
+  size          String?
   notes         String?
   paymentMode   String?
   allowOpen     Boolean       @default(false)
@@ -272,6 +274,7 @@ model Parcel {
   deliveryWindow      String?
   tryProduct          Boolean   @default(false)
   liabilityAcceptedAt DateTime?
+  contentDeclarationAcceptedAt DateTime?
   landmarkPhotoName   String?
   addressQuality      Int?
   codSettledAt        DateTime?

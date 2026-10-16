@@ -93,6 +93,18 @@ export class CreateParcelDto {
   @MaxLength(200)
   designation?: string;
 
+  @ApiPropertyOptional({ description: 'Product color (couleur)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  color?: string;
+
+  @ApiPropertyOptional({ description: 'Product size (taille)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  size?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -127,6 +139,14 @@ export class CreateParcelDto {
   @IsOptional()
   @IsISO8601()
   liabilityAcceptedAt?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ISO timestamp — sender declares content is light, lawful under Tunisian law, and assumes full liability',
+  })
+  @IsOptional()
+  @IsISO8601()
+  contentDeclarationAcceptedAt?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

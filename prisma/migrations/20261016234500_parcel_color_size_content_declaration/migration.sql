@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Parcel" ADD COLUMN IF NOT EXISTS "color" TEXT;
+ALTER TABLE "Parcel" ADD COLUMN IF NOT EXISTS "size" TEXT;
+ALTER TABLE "Parcel" ADD COLUMN IF NOT EXISTS "contentDeclarationAcceptedAt" TIMESTAMP(3);
