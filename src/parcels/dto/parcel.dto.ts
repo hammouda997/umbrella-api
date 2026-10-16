@@ -111,6 +111,12 @@ export class CreateParcelDto {
   @IsBoolean()
   allowOpen?: boolean;
 
+  @ApiPropertyOptional({ description: 'Fragile parcel handling' })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  isFragile?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @Transform(toBoolean)

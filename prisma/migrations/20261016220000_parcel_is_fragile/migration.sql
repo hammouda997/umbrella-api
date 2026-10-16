@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Parcel" ADD COLUMN IF NOT EXISTS "isFragile" BOOLEAN NOT NULL DEFAULT false;

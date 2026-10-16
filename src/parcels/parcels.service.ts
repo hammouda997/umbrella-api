@@ -112,6 +112,7 @@ export class ParcelsService {
       notes: dto.notes,
       paymentMode: dto.paymentMode,
       allowOpen: dto.allowOpen,
+      isFragile: dto.isFragile,
       tryProduct: dto.tryProduct,
       isExchange: dto.isExchange,
       exchangeNotes: dto.exchangeNotes,
@@ -200,9 +201,12 @@ export class ParcelsService {
       adresse: dto.address,
       prix: dto.price,
       nb_article: dto.articleCount ?? 1,
-      msg: dto.notes ?? '',
+      msg: [dto.notes, dto.isFragile ? 'FRAGILE' : null]
+        .filter(Boolean)
+        .join(' · '),
       designation: dto.designation ?? '',
       ouvrir: dto.allowOpen ? 'Oui' : 'Non',
+      fragile: dto.isFragile ? 'Oui' : 'Non',
       echange: dto.isExchange ? '1' : '0',
       ...(dto.isExchange && dto.exchangeNotes
         ? { article: dto.exchangeNotes }
@@ -263,6 +267,7 @@ export class ParcelsService {
           articleCount: dto.articleCount ?? 1,
           parcelCount: dto.parcelCount ?? 1,
           tryProduct: dto.tryProduct ?? dto.allowOpen ?? false,
+          isFragile: dto.isFragile ?? false,
           mode,
           status: ParcelStatus.EN_ATTENTE,
           code,

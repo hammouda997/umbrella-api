@@ -258,6 +258,7 @@ model Parcel {
   notes         String?
   paymentMode   String?
   allowOpen     Boolean       @default(false)
+  isFragile     Boolean       @default(false)
   isExchange    Boolean       @default(false)
   exchangeNotes String?
   mode          DeliveryMode  @default(EXTERNAL)
