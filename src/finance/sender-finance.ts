@@ -59,13 +59,13 @@ export function netPayoutOf(p: ParcelMoneyInput): number {
 
 /**
  * Merchant P&L for a closed parcel:
- * - delivered: sale − livraison
+ * - delivered: vente − base (COD) − livraison
  * - returned: −(livraison + retour)
  * - otherwise: null (still in pipeline)
  */
 export function parcelProfitOf(p: ParcelMoneyInput): number | null {
   if (DELIVERED_STATUSES.has(p.status)) {
-    return roundMoney(salePriceOf(p) - deliveryFeeOf(p));
+    return roundMoney(salePriceOf(p) - n(p.price) - deliveryFeeOf(p));
   }
   if (RETURN_STATUSES.has(p.status)) {
     return roundMoney(-(deliveryFeeOf(p) + returnFeeOf(p)));
