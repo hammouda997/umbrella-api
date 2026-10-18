@@ -12,7 +12,23 @@ import {
 import {
   ALLOWED_CATEGORY_KEYS,
   DEFAULT_STATUS_CATEGORIES,
+  JOURNEY_STEP_KEYS,
 } from './status-category.defaults';
+
+const JOURNEY_LABELS: Record<string, string> = {
+  EN_ATTENTE: 'En attente de collecte',
+  ENLEVES: 'Colis récupéré',
+  AU_DEPOT: 'Arrivé au dépôt',
+  EXPEDIE_DESTINATION: 'Expédié vers le dépôt de destination',
+  ARRIVE_DESTINATION: 'Arrivé au dépôt de destination',
+  AFFECTE_LIVREUR: 'Affecté à un livreur',
+  EN_COURS: 'En cours de livraison',
+  LIVRES: 'Livré',
+  LIVRAISON_ANNULEE: 'Livraison annulée',
+  RETOUR_DEPOT: 'Retour en agence',
+  RETOUR_EXPEDITEURS: 'En transit vers l’expéditeur',
+  RETOUR_RECU: 'Retour livré à l’expéditeur',
+};
 
 @Injectable()
 export class StatusCategoriesService {
@@ -20,6 +36,7 @@ export class StatusCategoriesService {
 
   async list() {
     await this.ensureDefaults();
+    await this.ensureJourneySteps();
     return this.prisma.statusCategory.findMany({
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     });
@@ -46,6 +63,8 @@ export class StatusCategoriesService {
         icon: dto.icon,
         sortOrder,
         isActive: dto.isActive ?? true,
+        showInJourney: dto.showInJourney ?? true,
+        visibleRoles: dto.visibleRoles ?? [],
       },
     });
   }
@@ -73,6 +92,8 @@ export class StatusCategoriesService {
         icon: dto.icon,
         sortOrder: dto.sortOrder,
         isActive: dto.isActive,
+        showInJourney: dto.showInJourney,
+        visibleRoles: dto.visibleRoles,
       },
     });
   }
@@ -100,13 +121,41 @@ export class StatusCategoriesService {
     if (count > 0) return;
     await this.prisma.statusCategory.createMany({
       data: DEFAULT_STATUS_CATEGORIES.map((row) => ({
-        key: row.key,
-        label: row.label,
-        color: row.color,
-        icon: row.icon,
-        sortOrder: row.sortOrder,
+        ...row,
         isActive: true,
+        showInJourney: true,
+        visibleRoles: [],
       })),
     });
+  }
+
+  /** Ensure every canonical parcours step exists so Super Admin can manage it. */
+  private async ensureJourneySteps() {
+    const existing = await this.prisma.statusCategory.findMany({
+      select: { key: true },
+    });
+    const have = new Set(existing.map((r) => r.key));
+    let sortOrder = await this.prisma.statusCategory.count();
+
+    for (const key of JOURNEY_STEP_KEYS) {
+      if (have.has(key)) continue;
+      await this.prisma.statusCategory.create({
+        data: {
+          key,
+          label: JOURNEY_LABELS[key] ?? key,
+          color: '#991211',
+          icon: key.startsWith('RETOUR') || key === 'LIVRAISON_ANNULEE'
+            ? 'return'
+            : key === 'LIVRES'
+              ? 'check'
+              : 'truck',
+          sortOrder: sortOrder++,
+          isActive: false,
+          showInJourney: true,
+          visibleRoles: [],
+        },
+      });
+      have.add(key);
+    }
   }
 }

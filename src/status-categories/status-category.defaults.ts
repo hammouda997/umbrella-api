@@ -87,6 +87,9 @@ export const ALLOWED_CATEGORY_KEYS = new Set<string>([
   'A_ENLEVER',
   'ENLEVES',
   'AU_DEPOT',
+  'EXPEDIE_DESTINATION',
+  'ARRIVE_DESTINATION',
+  'AFFECTE_LIVREUR',
   'RETOUR_DEPOT',
   'EN_COURS',
   'A_VERIFIER',
@@ -94,9 +97,48 @@ export const ALLOWED_CATEGORY_KEYS = new Set<string>([
   'LIVRES_PAYES',
   'ECHANGES',
   'REMBOURSES',
+  'LIVRAISON_ANNULEE',
   'RETOUR_DEFINITIF',
   'RETOUR_INTER_AGENCE',
   'RETOUR_EXPEDITEURS',
   'RETOUR_RECU',
   'SAISIE_DOUANE',
 ]);
+
+/** Canonical delivery / return parcours steps (order matters). */
+export const JOURNEY_LIVRAISON_KEYS = [
+  'EN_ATTENTE',
+  'ENLEVES',
+  'AU_DEPOT',
+  'EXPEDIE_DESTINATION',
+  'ARRIVE_DESTINATION',
+  'AFFECTE_LIVREUR',
+  'EN_COURS',
+  'LIVRES',
+] as const;
+
+export const JOURNEY_RETOUR_KEYS = [
+  'LIVRAISON_ANNULEE',
+  'RETOUR_DEPOT',
+  'RETOUR_EXPEDITEURS',
+  'RETOUR_RECU',
+] as const;
+
+export const JOURNEY_STEP_KEYS = [
+  ...JOURNEY_LIVRAISON_KEYS,
+  ...JOURNEY_RETOUR_KEYS,
+] as const;
+
+export const APP_ROLES_FOR_JOURNEY = [
+  'SUPER_ADMIN',
+  'ADMIN',
+  'EXPERT_COMPTABLE',
+  'CHEF_AGENCE',
+  'SUPPORT',
+  'PICKUP',
+  'MAGASINIER',
+  'FINANCE',
+  'EXPEDITEUR',
+  'LIVREUR',
+  'CLIENT',
+] as const;

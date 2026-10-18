@@ -489,17 +489,21 @@ model PaymentItem {
   @@unique([paymentRequestId, parcelId])
 }
 
-/** Dashboard KPI category styling (color + icon). Managed by SUPER_ADMIN only. */
+/** Dashboard KPI styling + parcours visibility. Managed by SUPER_ADMIN only. */
 model StatusCategory {
-  id        Int      @id @default(autoincrement())
-  key       String   @unique
-  label     String
-  color     String
-  icon      String
-  sortOrder Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            Int      @id @default(autoincrement())
+  key           String   @unique
+  label         String
+  color         String
+  icon          String
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  /** When false, step is hidden from parcel parcours for everyone. */
+  showInJourney Boolean  @default(true)
+  /** Empty = all roles. Otherwise only listed roles see the step. */
+  visibleRoles  String[] @default([])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([sortOrder])
 }

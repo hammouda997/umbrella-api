@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "StatusCategory" ADD COLUMN IF NOT EXISTS "showInJourney" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "StatusCategory" ADD COLUMN IF NOT EXISTS "visibleRoles" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
