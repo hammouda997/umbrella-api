@@ -18,7 +18,13 @@ import {
   ResetPasswordDto,
   SignInDto,
   SignUpDto,
+  SubmitKycDto,
 } from './dto/auth.dto';
+
+type KycTokenPayload = {
+  sub: number;
+  purpose: 'signup_kyc';
+};
 
 export const PORTAL_BY_ROLE: Record<Role, string> = {
   SUPER_ADMIN: '/super-admin',
@@ -48,6 +54,7 @@ type PublicUser = {
   agencyId: number | null;
   approvalStatus?: ApprovalStatus;
   productTypes?: string[];
+  parcelInputDefs?: unknown;
 };
 
 @Injectable()
@@ -133,11 +140,121 @@ export class AuthService {
       },
     });
 
+    const kycToken = await this.issueKycToken(user.id);
+
     return {
       pending: true as const,
       message: PENDING_MESSAGE,
+      kycToken,
+      kycRequired: true as const,
       user,
     };
+  }
+
+  async issueKycToken(userId: number) {
+    return this.jwt.signAsync(
+      { sub: userId, purpose: 'signup_kyc' } satisfies KycTokenPayload,
+      {
+        secret: this.config.getOrThrow('JWT_SECRET'),
+        expiresIn: '7d',
+      },
+    );
+  }
+
+  async verifyKycToken(token: string): Promise<number> {
+    let payload: KycTokenPayload;
+    try {
+      payload = await this.jwt.verifyAsync<KycTokenPayload>(token, {
+        secret: this.config.getOrThrow('JWT_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Jeton de vérification invalide ou expiré');
+    }
+    if (payload.purpose !== 'signup_kyc' || !payload.sub) {
+      throw new UnauthorizedException('Jeton de vérification invalide');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        role: true,
+        approvalStatus: true,
+        kycSubmittedAt: true,
+      },
+    });
+    if (!user || user.role !== Role.EXPEDITEUR) {
+      throw new UnauthorizedException('Compte introuvable');
+    }
+    if (user.approvalStatus === ApprovalStatus.REJECTED) {
+      throw new ForbiddenException(REJECTED_MESSAGE);
+    }
+    return user.id;
+  }
+
+  async submitKyc(token: string, dto: SubmitKycDto) {
+    const userId = await this.verifyKycToken(token);
+    const cinFrontUrl = this.assertUploadPath(dto.cinFrontUrl);
+    const cinBackUrl = this.assertUploadPath(dto.cinBackUrl);
+    const selfieWithCinUrl = this.assertUploadPath(dto.selfieWithCinUrl);
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        cinFrontUrl,
+        cinBackUrl,
+        selfieWithCinUrl,
+        kycSubmittedAt: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        approvalStatus: true,
+        kycSubmittedAt: true,
+      },
+    });
+
+    return {
+      ok: true as const,
+      message:
+        'Pièces d’identité reçues. Votre compte reste en vérification jusqu’à validation.',
+      user: updated,
+    };
+  }
+
+  async getKycStatus(token: string) {
+    const userId = await this.verifyKycToken(token);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        approvalStatus: true,
+        cinFrontUrl: true,
+        cinBackUrl: true,
+        selfieWithCinUrl: true,
+        kycSubmittedAt: true,
+      },
+    });
+    if (!user) throw new UnauthorizedException('Compte introuvable');
+    return {
+      ...user,
+      kycComplete: Boolean(
+        user.cinFrontUrl && user.cinBackUrl && user.selfieWithCinUrl,
+      ),
+    };
+  }
+
+  private assertUploadPath(raw: string) {
+    const value = raw.trim();
+    if (!value.startsWith('/uploads/')) {
+      throw new BadRequestException('URL de document invalide');
+    }
+    if (value.includes('..') || value.length > 400) {
+      throw new BadRequestException('URL de document invalide');
+    }
+    return value;
   }
 
   async signin(dto: SignInDto) {
@@ -188,6 +305,7 @@ export class AuthService {
       agencyId: user.agencyId,
       approvalStatus: user.approvalStatus,
       productTypes: user.productTypes ?? [],
+      parcelInputDefs: user.parcelInputDefs ?? [],
     };
     const tokens = await this.issueTokens(
       user.id,
@@ -218,6 +336,7 @@ export class AuthService {
         city: true,
         address: true,
         productTypes: true,
+        parcelInputDefs: true,
         productNotes: true,
         shopName: true,
         createdAt: true,
@@ -274,6 +393,7 @@ export class AuthService {
         agencyId: user.agencyId,
         approvalStatus: user.approvalStatus,
         productTypes: user.productTypes ?? [],
+        parcelInputDefs: user.parcelInputDefs ?? [],
       },
       portal: PORTAL_BY_ROLE[user.role],
       ...tokens,

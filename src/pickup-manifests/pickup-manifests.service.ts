@@ -60,7 +60,7 @@ const KIND_PREFIX: Record<PickupManifestKind, string> = {
 };
 
 const KIND_LABEL: Record<PickupManifestKind, string> = {
-  [PickupManifestKind.EN_ATTENTE]: 'en attente',
+  [PickupManifestKind.EN_ATTENTE]: 'En attente de collecte',
   [PickupManifestKind.PRE_ENLEVEMENT]: 'pré-enlèvement',
 };
 

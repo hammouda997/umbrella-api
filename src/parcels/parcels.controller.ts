@@ -179,6 +179,7 @@ export class ParcelsController {
     Role.PICKUP,
     Role.MAGASINIER,
     Role.SUPPORT,
+    Role.EXPEDITEUR,
   )
   @Patch(':id/status')
   updateStatus(

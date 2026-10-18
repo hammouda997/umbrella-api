@@ -19,6 +19,7 @@ import {
   CreatePaymentRequestDto,
   UpdatePaymentStatusDto,
 } from './dto/payment.dto';
+import { netPayoutOf } from '../finance/sender-finance';
 
 /** Petits paiements < 5k TND — skip expert. */
 export const SMALL_PAYMENT_MAX = 5000;
@@ -187,7 +188,15 @@ export class PaymentsService {
       );
     }
 
-    const amount = parcels.reduce((sum, p) => sum + Number(p.price), 0);
+    const lines = parcels.map((p) => ({
+      parcelId: p.id,
+      amount: netPayoutOf({
+        price: Number(p.price),
+        deliveryFee: Number(p.deliveryFee),
+        status: p.status,
+      }),
+    }));
+    const amount = lines.reduce((sum, line) => sum + line.amount, 0);
     const at = new Date().toISOString();
     const created = await this.prisma.paymentRequest.create({
       data: {
@@ -203,7 +212,10 @@ export class PaymentsService {
           },
         ],
         items: {
-          create: parcels.map((p) => ({ parcelId: p.id, amount: p.price })),
+          create: lines.map((line) => ({
+            parcelId: line.parcelId,
+            amount: line.amount,
+          })),
         },
       },
       include: PAYMENT_INCLUDE,

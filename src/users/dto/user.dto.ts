@@ -74,6 +74,18 @@ export class UpdateProfileDto {
   @IsString({ each: true })
   @MaxLength(80, { each: true })
   productTypes?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Expéditeur custom parcel inputs [{ id, label, required }] — used on create + bordereau',
+  })
+  @IsOptional()
+  @IsArray()
+  parcelInputDefs?: Array<{
+    id: string;
+    label: string;
+    required?: boolean;
+  }>;
 }
 
 export class ChangePasswordDto {

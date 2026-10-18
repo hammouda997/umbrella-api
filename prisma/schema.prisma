@@ -89,7 +89,14 @@ model User {
   address          String?
   shopName         String?
   productTypes     String[]         @default([])
+  /** Expéditeur-defined optional inputs shown on create + bordereau. */
+  parcelInputDefs  Json?
   productNotes     String?
+  /** Identity verification (expéditeur signup KYC). */
+  cinFrontUrl      String?
+  cinBackUrl       String?
+  selfieWithCinUrl String?
+  kycSubmittedAt   DateTime?
   refreshToken     String?
   passwordResetToken   String?
   passwordResetExpires DateTime?
@@ -251,13 +258,22 @@ model Parcel {
   city          String
   locality      String?
   address       String
+  /** COD / montant à encaisser chez le client. */
   price         Decimal       @db.Decimal(12, 3)
+  /** Prix de vente unitaire (marge expéditeur). Defaults to price when unset. */
+  unitSalePrice Decimal?      @db.Decimal(12, 3)
+  /** Frais de livraison débités à l’expéditeur (snapshot à la création). */
+  deliveryFee   Decimal       @default(0) @db.Decimal(12, 3)
+  /** Frais de retour appliqués si le colis est retourné. */
+  returnFee     Decimal       @default(0) @db.Decimal(12, 3)
   articleCount  Int           @default(1)
   parcelCount   Int           @default(1)
   designation   String?
   color         String?
   size          String?
   notes         String?
+  /** Snapshot of sender custom inputs [{ id, label, value }]. */
+  customInputs  Json?
   paymentMode   String?
   allowOpen     Boolean       @default(false)
   isFragile     Boolean       @default(false)
@@ -265,6 +281,8 @@ model Parcel {
   exchangeNotes String?
   mode          DeliveryMode  @default(EXTERNAL)
   status        ParcelStatus  @default(EN_ATTENTE)
+  /** Last cancel / verify / return motif (shown to expéditeur in filters). */
+  statusReason  String?
   bordereauUrl  String?
   navexRaw      Json?
   lastLat       Float?

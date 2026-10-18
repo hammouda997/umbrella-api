@@ -35,13 +35,19 @@ import {
 import {
   RETURN_STATUSES,
   canTransition,
+  keepsStatusReason,
   requiresComment,
 } from './parcel-transitions';
+import {
+  DEFAULT_DELIVERY_FEE,
+  DEFAULT_RETURN_FEE,
+} from '../finance/sender-finance';
 import {
   OPS_STAFF,
   isAgencyRole,
   isGlobalStaff,
 } from '../common/agency-roles';
+import { normalizeCustomInputs } from '../common/parcel-input-defs';
 import { ClientAccountsService } from '../sms/client-accounts.service';
 
 const STAFF_ROLES: Role[] = OPS_STAFF;
@@ -106,12 +112,19 @@ export class ParcelsService {
       locality: dto.locality,
       address: dto.address,
       price: dto.price,
+      unitSalePrice: dto.unitSalePrice,
+      deliveryFee: dto.deliveryFee,
+      returnFee: dto.returnFee,
       articleCount: dto.articleCount,
       parcelCount: dto.parcelCount,
       designation: dto.designation,
       color: dto.color,
       size: dto.size,
       notes: dto.notes,
+      customInputs:
+        dto.customInputs !== undefined
+          ? normalizeCustomInputs(dto.customInputs)
+          : undefined,
       paymentMode: dto.paymentMode,
       allowOpen: dto.allowOpen,
       isFragile: dto.isFragile,
@@ -363,6 +376,14 @@ export class ParcelsService {
           city: dto.city,
           address: dto.address,
           price: dto.price,
+          unitSalePrice:
+            dto.unitSalePrice !== undefined ? dto.unitSalePrice : dto.price,
+          deliveryFee:
+            dto.deliveryFee !== undefined
+              ? dto.deliveryFee
+              : DEFAULT_DELIVERY_FEE,
+          returnFee:
+            dto.returnFee !== undefined ? dto.returnFee : DEFAULT_RETURN_FEE,
           articleCount: dto.articleCount ?? 1,
           parcelCount: dto.parcelCount ?? 1,
           tryProduct: dto.tryProduct ?? dto.allowOpen ?? false,
@@ -1101,22 +1122,27 @@ export class ParcelsService {
         })
       )?.agencyId;
 
+    const isOwnerSender =
+      user.role === Role.EXPEDITEUR && parcel.senderId === user.id;
     const canUpdate =
-      STATUS_ROLES.includes(user.role) &&
-      (isGlobalStaff(user.role) ||
-        (user.role === Role.LIVREUR && parcel.driverId === user.id) ||
-        (isAgencyRole(user.role) &&
-          !!agencyId &&
-          parcel.agencyId === agencyId));
+      isOwnerSender ||
+      (STATUS_ROLES.includes(user.role) &&
+        (isGlobalStaff(user.role) ||
+          (user.role === Role.LIVREUR && parcel.driverId === user.id) ||
+          (isAgencyRole(user.role) &&
+            !!agencyId &&
+            parcel.agencyId === agencyId)));
     if (!canUpdate) throw new ForbiddenException();
 
     const gate = canTransition(parcel.status, dto.status, user.role);
     if (!gate.ok) throw new BadRequestException(gate.reason);
 
     const comment = dto.comment?.trim() || null;
-    if (requiresComment(dto.status, parcel.status) && !comment) {
+    if (requiresComment(dto.status, parcel.status, user.role) && !comment) {
       throw new BadRequestException(
-        'Un motif / commentaire est obligatoire pour ce statut',
+        user.role === Role.SUPPORT && dto.status === ParcelStatus.RETOUR_RECU
+          ? 'Motif obligatoire : pourquoi la commande a été annulée / le retour vérifié'
+          : 'Un motif / commentaire est obligatoire pour ce statut',
       );
     }
 
@@ -1129,11 +1155,27 @@ export class ParcelsService {
       nextDriverId = driver.id;
     }
 
+    const nextReason = comment
+      ? comment
+      : keepsStatusReason(dto.status)
+        ? parcel.statusReason
+        : null;
+
+    const eventLabel =
+      user.role === Role.EXPEDITEUR &&
+      dto.status === ParcelStatus.RETOUR_RECU
+        ? 'Vérification passée (expéditeur)'
+        : user.role === Role.SUPPORT &&
+            dto.status === ParcelStatus.RETOUR_RECU
+          ? 'Vérification retour (support)'
+          : PARCEL_STATUS_LABEL[dto.status];
+
     await this.prisma.$transaction(async (tx) => {
       await tx.parcel.update({
         where: { id },
         data: {
           status: dto.status,
+          statusReason: nextReason,
           ...(nextDriverId != null ? { driverId: nextDriverId } : {}),
           lastLat: dto.lat,
           lastLng: dto.lng,
@@ -1141,7 +1183,7 @@ export class ParcelsService {
       });
       await this.recordEvent(tx, {
         parcelId: id,
-        label: PARCEL_STATUS_LABEL[dto.status],
+        label: eventLabel,
         status: dto.status,
         comment,
         actorId: user.id,

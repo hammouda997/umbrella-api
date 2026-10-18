@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ParcelStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { summarizeSenderFinance } from '../finance/sender-finance';
 
 export const DASHBOARD_STATUSES: Array<{
   key: ParcelStatus;
@@ -224,8 +225,7 @@ export class DashboardService {
       exchanges,
       modeGroups,
       recent,
-      deliveredSum,
-      returnSum,
+      moneyParcels,
       payments,
     ] = await Promise.all([
       this.prisma.parcel.count({ where: baseWhere }),
@@ -278,19 +278,24 @@ export class DashboardService {
         take: 200,
         select: { createdAt: true, status: true, mode: true, price: true },
       }),
-      this.prisma.parcel.aggregate({
+      this.prisma.parcel.findMany({
         where: {
           ...baseWhere,
-          status: { in: [ParcelStatus.LIVRES, ParcelStatus.LIVRES_PAYES] },
+          status: {
+            in: [
+              ParcelStatus.LIVRES,
+              ParcelStatus.LIVRES_PAYES,
+              ...returnStatuses,
+            ],
+          },
         },
-        _sum: { price: true },
-      }),
-      this.prisma.parcel.aggregate({
-        where: {
-          ...baseWhere,
-          status: { in: returnStatuses },
+        select: {
+          price: true,
+          unitSalePrice: true,
+          deliveryFee: true,
+          returnFee: true,
+          status: true,
         },
-        _sum: { price: true },
       }),
       this.prisma.paymentRequest.findMany({
         where: isSender ? { senderId: user.id } : {},
@@ -340,19 +345,20 @@ export class DashboardService {
       0,
     );
 
-    const encaisse = Number(deliveredSum._sum.price ?? 0);
-    const enDemande = payments
-      .filter((p) => p.status === 'EN_DEMANDE')
-      .reduce((s, p) => s + Number(p.amount), 0);
-    const aVerser = payments
-      .filter((p) => p.status === 'APPROUVE')
-      .reduce((s, p) => s + Number(p.amount), 0);
-    const verse = payments
-      .filter((p) => p.status === 'PAYE')
-      .reduce((s, p) => s + Number(p.amount), 0);
-    const retoursMontant = Number(returnSum._sum.price ?? 0);
-    const retoursFrais = Math.round(returns * 7 * 100) / 100;
-    const disponible = Math.max(0, encaisse - enDemande - aVerser - verse);
+    const finance = summarizeSenderFinance(
+      moneyParcels.map((p) => ({
+        price: Number(p.price),
+        unitSalePrice:
+          p.unitSalePrice != null ? Number(p.unitSalePrice) : null,
+        deliveryFee: Number(p.deliveryFee),
+        returnFee: Number(p.returnFee),
+        status: p.status,
+      })),
+      payments.map((p) => ({
+        amount: Number(p.amount),
+        status: p.status,
+      })),
+    );
 
     return {
       kpis: {
@@ -365,17 +371,23 @@ export class DashboardService {
         awaiting,
         exchanges,
         revenue,
+        profit: finance.profit,
+        ventes: finance.ventes,
         deliveryRate: total ? Math.round((delivered / total) * 100) : 0,
         returnRate: total ? Math.round((returns / total) * 100) : 0,
       },
       soldes: {
-        disponible,
-        enDemande,
-        aVerser,
-        verse,
-        encaisse,
-        retoursMontant,
-        retoursFrais,
+        disponible: finance.disponible,
+        enDemande: finance.enDemande,
+        aVerser: finance.aVerser,
+        enPipeline: finance.enPipeline,
+        verse: finance.verse,
+        encaisse: finance.encaisse,
+        retoursMontant: finance.retoursMontant,
+        retoursFrais: finance.retoursFrais,
+        fraisLivraison: finance.fraisLivraison,
+        profit: finance.profit,
+        ventes: finance.ventes,
       },
       last7Days: dayKeys.map((key) => ({
         date: key,

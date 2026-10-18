@@ -21,6 +21,7 @@ import {
   UpdateProfileDto,
   UpdateUserDto,
 } from './dto/user.dto';
+import { normalizeInputDefs } from '../common/parcel-input-defs';
 
 const ADMIN_CREATABLE: Role[] = [
   Role.EXPEDITEUR,
@@ -50,7 +51,12 @@ const PUBLIC_USER_SELECT = {
   address: true,
   shopName: true,
   productTypes: true,
+  parcelInputDefs: true,
   productNotes: true,
+  cinFrontUrl: true,
+  cinBackUrl: true,
+  selfieWithCinUrl: true,
+  kycSubmittedAt: true,
   isActive: true,
   createdAt: true,
   agency: { select: { id: true, name: true, governorate: true } },
@@ -257,6 +263,15 @@ export class UsersService {
     ) {
       throw new ForbiddenException();
     }
+    if (
+      status === ApprovalStatus.APPROVED &&
+      target.role === Role.EXPEDITEUR &&
+      (!target.cinFrontUrl || !target.cinBackUrl || !target.selfieWithCinUrl)
+    ) {
+      throw new BadRequestException(
+        'KYC incomplet : CIN recto, verso et selfie avec pièce requis avant approbation',
+      );
+    }
 
     const updated = await this.prisma.user.update({
       where: { id },
@@ -306,6 +321,10 @@ export class UsersService {
             (x) => x.localeCompare(t, 'fr', { sensitivity: 'base' }) === 0,
           ) === i,
       );
+    const parcelInputDefs =
+      dto.parcelInputDefs !== undefined
+        ? normalizeInputDefs(dto.parcelInputDefs)
+        : undefined;
     return this.prisma.user.update({
       where: { id: actor.id },
       data: {
@@ -313,6 +332,7 @@ export class UsersService {
         ...(email !== undefined ? { email } : {}),
         ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
         ...(productTypes !== undefined ? { productTypes } : {}),
+        ...(parcelInputDefs !== undefined ? { parcelInputDefs } : {}),
       },
       select: PUBLIC_USER_SELECT,
     });

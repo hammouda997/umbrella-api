@@ -23,6 +23,9 @@ const KINDS = new Set([
   'facture',
   'decharge',
   'cin',
+  'cin-front',
+  'cin-back',
+  'selfie-cin',
   'receipt',
   'other',
 ]);
@@ -57,7 +60,16 @@ export class UploadsController {
   @ApiQuery({
     name: 'kind',
     required: false,
-    enum: ['facture', 'decharge', 'cin', 'receipt', 'other'],
+    enum: [
+      'facture',
+      'decharge',
+      'cin',
+      'cin-front',
+      'cin-back',
+      'selfie-cin',
+      'receipt',
+      'other',
+    ],
   })
   @ApiBody({
     schema: {

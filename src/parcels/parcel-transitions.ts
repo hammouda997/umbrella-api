@@ -152,6 +152,13 @@ const SUPPORT_TARGETS = new Set<ParcelStatus>([
   ParcelStatus.RETOUR_DEFINITIF,
 ]);
 
+/** Expéditeur may only pass return verification → RETOUR_RECU. */
+export const EXPEDITEUR_VERIFY_FROM = new Set<ParcelStatus>([
+  ParcelStatus.RETOUR_EXPEDITEURS,
+  ParcelStatus.RETOUR_DEPOT,
+  ParcelStatus.RETOUR_INTER_AGENCE,
+]);
+
 const COMMENT_REQUIRED = new Set<ParcelStatus>([
   ParcelStatus.A_VERIFIER,
   ParcelStatus.LIVRAISON_ANNULEE,
@@ -164,6 +171,18 @@ const COMMENT_REQUIRED = new Set<ParcelStatus>([
   ParcelStatus.SAISIE_DOUANE,
   ParcelStatus.REMBOURSES,
 ]);
+
+/** Statuses where statusReason should stay visible on lists / filters. */
+export const REASON_VISIBLE_STATUSES: ParcelStatus[] = [
+  ParcelStatus.A_VERIFIER,
+  ParcelStatus.LIVRAISON_ANNULEE,
+  ParcelStatus.RETOUR_DEPOT,
+  ParcelStatus.RETOUR_INTER_AGENCE,
+  ParcelStatus.RETOUR_EXPEDITEURS,
+  ParcelStatus.RETOUR_RECU,
+  ParcelStatus.RETOUR_DEFINITIF,
+  ParcelStatus.NON_SERIEUX,
+];
 
 export const RETURN_STATUSES: ParcelStatus[] = [
   ParcelStatus.LIVRAISON_ANNULEE,
@@ -229,10 +248,37 @@ export function canTransition(
     };
   }
 
+  if (role === Role.EXPEDITEUR) {
+    if (to !== ParcelStatus.RETOUR_RECU) {
+      return {
+        ok: false,
+        reason:
+          'Expéditeur : seule la validation du retour (passer la vérification) est autorisée',
+      };
+    }
+    if (!EXPEDITEUR_VERIFY_FROM.has(from)) {
+      return {
+        ok: false,
+        reason: 'Ce colis n’est pas en attente de vérification retour',
+      };
+    }
+  }
+
   return { ok: true };
 }
 
-export function requiresComment(to: ParcelStatus, from: ParcelStatus): boolean {
+export function requiresComment(
+  to: ParcelStatus,
+  from: ParcelStatus,
+  role?: Role,
+): boolean {
   if (from === to) return false;
-  return COMMENT_REQUIRED.has(to);
+  if (COMMENT_REQUIRED.has(to)) return true;
+  // Support must explain cancel cause when closing return verification.
+  if (to === ParcelStatus.RETOUR_RECU && role === Role.SUPPORT) return true;
+  return false;
+}
+
+export function keepsStatusReason(status: ParcelStatus): boolean {
+  return REASON_VISIBLE_STATUSES.includes(status);
 }

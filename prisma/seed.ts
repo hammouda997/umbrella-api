@@ -52,6 +52,7 @@ type SeedParcel = {
   notes: string | null;
   designation?: string;
   status: ParcelStatus;
+  statusReason?: string | null;
   mode: DeliveryMode;
   bordereauUrl: string | null;
   daysAgo: number;
@@ -378,9 +379,26 @@ const PARCELS: SeedParcel[] = [
     price: 38,
     notes: 'Retour lot demo',
     status: ParcelStatus.LIVRAISON_ANNULEE,
+    statusReason: 'Client — refuse la commande',
     mode: DeliveryMode.INTERNAL,
     bordereauUrl: null,
     daysAgo: 3,
+  },
+  {
+    code: 'UMB-RET-EXP-001',
+    recipientName: 'Sami Gharbi',
+    phone: '51926850',
+    governorate: 'Tunis',
+    city: 'Tunis',
+    address: 'Centre ville',
+    price: 42,
+    notes: 'Chaussures',
+    designation: 'Chaussures',
+    status: ParcelStatus.RETOUR_EXPEDITEURS,
+    statusReason: 'Expéditeur — annulation après enlèvement',
+    mode: DeliveryMode.INTERNAL,
+    bordereauUrl: null,
+    daysAgo: 2,
   },
   {
     code: 'UMB-LIVP-001',
@@ -406,6 +424,7 @@ const PARCELS: SeedParcel[] = [
     price: 88,
     notes: 'Montre',
     status: ParcelStatus.A_VERIFIER,
+    statusReason: 'Client absent — reporté à demain 14h',
     mode: DeliveryMode.EXTERNAL,
     bordereauUrl: null,
     daysAgo: 5,
@@ -674,6 +693,7 @@ async function main() {
         notes: p.notes,
         designation: p.designation,
         status: p.status,
+        statusReason: p.statusReason ?? null,
         mode: p.mode,
         bordereauUrl: p.bordereauUrl,
         paymentMode: 'espece',

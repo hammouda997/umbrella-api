@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsIn,
@@ -12,10 +13,31 @@ import {
   Min,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { DeliveryMode, ParcelStatus } from '@prisma/client';
 import { Type, Transform } from 'class-transformer';
+
+export class ParcelCustomInputDto {
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  id!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(60)
+  label!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  value!: string;
+}
 
 export const DELIVERY_WINDOWS = [
   'matin',
@@ -73,6 +95,29 @@ export class CreateParcelDto {
   @Min(0)
   price!: number;
 
+  @ApiPropertyOptional({
+    description: 'Prix de vente unitaire (marge). Si omis = COD.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitSalePrice?: number;
+
+  @ApiPropertyOptional({ description: 'Frais livraison débités à l’expéditeur' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  deliveryFee?: number;
+
+  @ApiPropertyOptional({ description: 'Frais retour si colis retourné' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  returnFee?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @Type(() => Number)
@@ -110,6 +155,16 @@ export class CreateParcelDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiPropertyOptional({
+    type: [ParcelCustomInputDto],
+    description: 'Sender custom input values (snapshot for bordereau)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ParcelCustomInputDto)
+  customInputs?: ParcelCustomInputDto[];
 
   @ApiPropertyOptional()
   @IsOptional()

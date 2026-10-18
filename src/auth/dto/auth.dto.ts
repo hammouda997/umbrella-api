@@ -82,6 +82,26 @@ export class SignUpDto {
   shopName?: string;
 }
 
+export class SubmitKycDto {
+  @ApiProperty({ description: 'URL CIN recto (/uploads/...)' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(400)
+  cinFrontUrl!: string;
+
+  @ApiProperty({ description: 'URL CIN verso (/uploads/...)' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(400)
+  cinBackUrl!: string;
+
+  @ApiProperty({ description: 'URL selfie avec CIN ou document' })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(400)
+  selfieWithCinUrl!: string;
+}
+
 export class SignInDto {
   @ApiProperty({
     description: 'Email, ou téléphone client 8 chiffres',
