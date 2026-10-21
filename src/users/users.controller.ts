@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -18,6 +20,7 @@ import {
   UpdateUserActiveDto,
   UpdateUserApprovalDto,
   UpdateUserDto,
+  UpsertCreateParcelDraftDto,
 } from './dto/user.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -68,6 +71,42 @@ export class UsersController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.users.changePassword(user, dto);
+  }
+
+  @Roles(
+    Role.EXPEDITEUR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+    Role.CHEF_AGENCE,
+  )
+  @Get('me/create-parcel-draft')
+  getCreateParcelDraft(@CurrentUser() user: AuthUser) {
+    return this.users.getCreateParcelDraft(user);
+  }
+
+  @Roles(
+    Role.EXPEDITEUR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+    Role.CHEF_AGENCE,
+  )
+  @Put('me/create-parcel-draft')
+  upsertCreateParcelDraft(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpsertCreateParcelDraftDto,
+  ) {
+    return this.users.upsertCreateParcelDraft(user, dto.draft);
+  }
+
+  @Roles(
+    Role.EXPEDITEUR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+    Role.CHEF_AGENCE,
+  )
+  @Delete('me/create-parcel-draft')
+  clearCreateParcelDraft(@CurrentUser() user: AuthUser) {
+    return this.users.clearCreateParcelDraft(user);
   }
 
   @Patch(':id')

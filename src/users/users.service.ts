@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { ApprovalStatus, Role } from '@prisma/client';
+import { ApprovalStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import {
@@ -336,6 +336,51 @@ export class UsersService {
       },
       select: PUBLIC_USER_SELECT,
     });
+  }
+
+  async getCreateParcelDraft(actor: AuthUser) {
+    const row = await this.prisma.user.findUnique({
+      where: { id: actor.id },
+      select: { createParcelDraft: true, updatedAt: true },
+    });
+    if (!row) throw new NotFoundException('User not found');
+    const draft = row.createParcelDraft;
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) {
+      return { draft: null as Record<string, unknown> | null };
+    }
+    return { draft: draft as Record<string, unknown> };
+  }
+
+  async upsertCreateParcelDraft(
+    actor: AuthUser,
+    draft: Record<string, unknown>,
+  ) {
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) {
+      throw new BadRequestException('Draft invalide');
+    }
+    const stepIndex = draft.stepIndex;
+    if (typeof stepIndex !== 'number' || !Number.isFinite(stepIndex)) {
+      throw new BadRequestException('Draft.stepIndex requis');
+    }
+    const raw = JSON.stringify(draft);
+    if (raw.length > 80_000) {
+      throw new BadRequestException('Draft trop volumineux');
+    }
+    await this.prisma.user.update({
+      where: { id: actor.id },
+      data: { createParcelDraft: draft as Prisma.InputJsonValue },
+      select: { id: true },
+    });
+    return { draft };
+  }
+
+  async clearCreateParcelDraft(actor: AuthUser) {
+    await this.prisma.user.update({
+      where: { id: actor.id },
+      data: { createParcelDraft: Prisma.DbNull },
+      select: { id: true },
+    });
+    return { draft: null as null };
   }
 
   async changePassword(actor: AuthUser, dto: ChangePasswordDto) {

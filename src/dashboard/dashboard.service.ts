@@ -3,6 +3,7 @@ import { ParcelStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { summarizeSenderFinance } from '../finance/sender-finance';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 export const DASHBOARD_STATUSES: Array<{
   key: ParcelStatus;
@@ -21,21 +22,21 @@ export const DASHBOARD_STATUSES: Array<{
     tone: 'violet',
   },
   { key: ParcelStatus.ENLEVES, label: 'Colis récupéré', tone: 'lavender' },
-  { key: ParcelStatus.AU_DEPOT, label: 'Arrivé au dépôt', tone: 'blue' },
+  { key: ParcelStatus.AU_DEPOT, label: 'Au dépôt', tone: 'blue' },
   {
     key: ParcelStatus.EXPEDIE_DESTINATION,
-    label: 'Expédié vers le dépôt de destination',
+    label: 'Au dépôt',
     tone: 'sky',
   },
   {
     key: ParcelStatus.ARRIVE_DESTINATION,
-    label: 'Arrivé au dépôt de destination',
+    label: 'Au dépôt',
     tone: 'blue',
   },
   {
     key: ParcelStatus.AFFECTE_LIVREUR,
-    label: 'Affecté à un livreur',
-    tone: 'violet',
+    label: 'En cours de livraison',
+    tone: 'mint',
   },
   {
     key: ParcelStatus.EN_COURS,
@@ -82,7 +83,10 @@ export const DASHBOARD_STATUSES: Array<{
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly platformSettings: PlatformSettingsService,
+  ) {}
 
   async statusCounts(user: AuthUser) {
     let where: Record<string, unknown>;
@@ -227,6 +231,7 @@ export class DashboardService {
       recent,
       moneyParcels,
       payments,
+      holdHours,
     ] = await Promise.all([
       this.prisma.parcel.count({ where: baseWhere }),
       this.prisma.parcel.count({
@@ -290,17 +295,25 @@ export class DashboardService {
           },
         },
         select: {
+          id: true,
           price: true,
           unitSalePrice: true,
+          unitCost: true,
           deliveryFee: true,
           returnFee: true,
           status: true,
+          deliveredAt: true,
         },
       }),
       this.prisma.paymentRequest.findMany({
         where: isSender ? { senderId: user.id } : {},
-        select: { amount: true, status: true },
+        select: {
+          amount: true,
+          status: true,
+          items: { select: { parcelId: true, amount: true } },
+        },
       }),
+      this.platformSettings.getVersementHoldHours(),
     ]);
 
     const dayKeys: string[] = [];
@@ -347,17 +360,25 @@ export class DashboardService {
 
     const finance = summarizeSenderFinance(
       moneyParcels.map((p) => ({
+        id: p.id,
         price: Number(p.price),
         unitSalePrice:
           p.unitSalePrice != null ? Number(p.unitSalePrice) : null,
+        unitCost: p.unitCost != null ? Number(p.unitCost) : null,
         deliveryFee: Number(p.deliveryFee),
         returnFee: Number(p.returnFee),
         status: p.status,
+        deliveredAt: p.deliveredAt,
       })),
       payments.map((p) => ({
         amount: Number(p.amount),
         status: p.status,
+        items: p.items.map((i) => ({
+          parcelId: i.parcelId,
+          amount: Number(i.amount),
+        })),
       })),
+      { holdHours },
     );
 
     return {
@@ -378,6 +399,8 @@ export class DashboardService {
       },
       soldes: {
         disponible: finance.disponible,
+        indisponible: finance.indisponible,
+        holdHours: finance.holdHours,
         enDemande: finance.enDemande,
         aVerser: finance.aVerser,
         enPipeline: finance.enPipeline,

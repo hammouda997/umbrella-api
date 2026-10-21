@@ -30,3 +30,9 @@ export class UpdatePaymentStatusDto {
   @Min(0)
   amount?: number;
 }
+
+export class UploadPaymentDechargeDto {
+  @ApiProperty({ example: 'https://…/decharge.pdf' })
+  @IsString()
+  dechargeUrl!: string;
+}

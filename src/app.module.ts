@@ -22,6 +22,8 @@ import { SupportBotModule } from './support-bot/support-bot.module';
 import { SmsModule } from './sms/sms.module';
 import { CashModule } from './cash/cash.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { StockModule } from './stock/stock.module';
+import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { HealthController } from './health/health.controller';
 
@@ -35,6 +37,8 @@ import { HealthController } from './health/health.controller';
     NavexModule,
     UsersModule,
     ParcelsModule,
+    StockModule,
+    PlatformSettingsModule,
     CashModule,
     UploadsModule,
     TicketsModule,

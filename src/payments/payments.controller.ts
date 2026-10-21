@@ -19,6 +19,7 @@ import { PaymentsService } from './payments.service';
 import {
   CreatePaymentRequestDto,
   UpdatePaymentStatusDto,
+  UploadPaymentDechargeDto,
 } from './dto/payment.dto';
 
 const STAFF = [
@@ -61,7 +62,8 @@ export class PaymentsController {
     );
   }
 
-  @Roles(...STAFF, Role.EXPEDITEUR)
+  /** Staff only — expéditeur never creates a demande. */
+  @Roles(...STAFF)
   @Post()
   create(
     @CurrentUser() user: AuthUser,
@@ -78,5 +80,16 @@ export class PaymentsController {
     @Body() dto: UpdatePaymentStatusDto,
   ) {
     return this.payments.updateStatus(user, id, dto);
+  }
+
+  /** Expéditeur uploads signed décharge → PAYÉ. */
+  @Roles(Role.EXPEDITEUR)
+  @Post(':id/decharge')
+  uploadDecharge(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UploadPaymentDechargeDto,
+  ) {
+    return this.payments.uploadDecharge(user, id, dto.dechargeUrl);
   }
 }

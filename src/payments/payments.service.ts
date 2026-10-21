@@ -19,7 +19,8 @@ import {
   CreatePaymentRequestDto,
   UpdatePaymentStatusDto,
 } from './dto/payment.dto';
-import { netPayoutOf } from '../finance/sender-finance';
+import { isHoldElapsed, netPayoutOf } from '../finance/sender-finance';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 /** Petits paiements < 5k TND — skip expert. */
 export const SMALL_PAYMENT_MAX = 5000;
@@ -34,22 +35,26 @@ const STAFF: Role[] = [
   Role.CHEF_AGENCE,
   Role.FINANCE,
 ];
-const PAYABLE: ParcelStatus[] = [
-  ParcelStatus.LIVRES,
-  ParcelStatus.LIVRES_PAYES,
-];
+const PAYABLE: ParcelStatus[] = [ParcelStatus.LIVRES];
 const ACTIVE_REQUEST: PaymentRequestStatus[] = [
   PaymentRequestStatus.EN_DEMANDE,
   PaymentRequestStatus.VALIDE_FINANCE,
   PaymentRequestStatus.VALIDE_CHEF,
   PaymentRequestStatus.VALIDE_EXPERT,
   PaymentRequestStatus.APPROUVE,
+  PaymentRequestStatus.AWAITING_DECHARGE,
   PaymentRequestStatus.PAYE,
 ];
 
 const PAYMENT_INCLUDE = {
-  items: { include: { parcel: { select: { id: true, code: true, agencyId: true } } } },
-  sender: { select: { id: true, name: true, email: true, agencyId: true } },
+  items: {
+    include: {
+      parcel: { select: { id: true, code: true, agencyId: true } },
+    },
+  },
+  sender: {
+    select: { id: true, name: true, email: true, agencyId: true },
+  },
 } satisfies Prisma.PaymentRequestInclude;
 
 type PaymentWithItems = Prisma.PaymentRequestGetPayload<{
@@ -64,11 +69,12 @@ type PaymentHistoryEntry = {
 };
 
 const HISTORY_LABEL: Partial<Record<PaymentRequestStatus, string>> = {
-  EN_DEMANDE: 'Demande créée',
+  EN_DEMANDE: 'Versement préparé',
   VALIDE_FINANCE: 'Validé finance',
   VALIDE_CHEF: 'Validé chef d’agence',
   VALIDE_EXPERT: 'Validé expert',
   APPROUVE: 'Validé finance',
+  AWAITING_DECHARGE: 'En attente de décharge',
   PAYE: 'Versé',
   REJETE: 'Rejeté',
 };
@@ -94,7 +100,7 @@ function historyForPayment(
     {
       at: payment.createdAt.toISOString(),
       status: PaymentRequestStatus.EN_DEMANDE,
-      label: HISTORY_LABEL.EN_DEMANDE ?? 'Demande créée',
+      label: HISTORY_LABEL.EN_DEMANDE ?? 'Versement préparé',
       actorName: payment.sender?.name ?? null,
     },
   ];
@@ -157,13 +163,20 @@ function normalizeStatus(status: PaymentRequestStatus): PaymentRequestStatus {
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly platformSettings: PlatformSettingsService,
+  ) {}
 
   async create(user: AuthUser, dto: CreatePaymentRequestDto) {
-    if (![...STAFF, Role.EXPEDITEUR].includes(user.role)) {
-      throw new ForbiddenException();
+    if (!STAFF.includes(user.role)) {
+      throw new ForbiddenException(
+        'Seuls les équipes finance / agence préparent un versement',
+      );
     }
     const parcelIds = [...new Set(dto.parcelIds)];
+    const holdHours = await this.platformSettings.getVersementHoldHours();
+    const now = new Date();
 
     const parcels = await this.prisma.parcel.findMany({
       where: {
@@ -172,19 +185,28 @@ export class PaymentsService {
         paymentItems: {
           none: { paymentRequest: { status: { in: ACTIVE_REQUEST } } },
         },
-        ...(user.role === Role.EXPEDITEUR ? { senderId: user.id } : {}),
       },
     });
 
     if (parcels.length !== parcelIds.length) {
       throw new BadRequestException(
-        'Certains colis sont introuvables, non livrés ou déjà dans une demande',
+        'Certains colis sont introuvables, non livrés ou déjà dans un versement',
       );
     }
+
+    const notReady = parcels.filter(
+      (p) => !isHoldElapsed(p.deliveredAt, holdHours, now),
+    );
+    if (notReady.length) {
+      throw new BadRequestException(
+        `Délai de versement non écoulé (${holdHours}h) pour certains colis`,
+      );
+    }
+
     const senders = new Set(parcels.map((p) => p.senderId));
     if (senders.size > 1) {
       throw new BadRequestException(
-        'Une demande ne peut concerner qu’un seul expéditeur',
+        'Un versement ne peut concerner qu’un seul expéditeur',
       );
     }
 
@@ -207,7 +229,7 @@ export class PaymentsService {
           {
             at,
             status: PaymentRequestStatus.EN_DEMANDE,
-            label: HISTORY_LABEL.EN_DEMANDE ?? 'Demande créée',
+            label: HISTORY_LABEL.EN_DEMANDE ?? 'Versement préparé',
             actorName: user.email,
           },
         ],
@@ -321,24 +343,63 @@ export class PaymentsService {
     if (target === PaymentRequestStatus.REJETE) {
       if (
         current === PaymentRequestStatus.PAYE ||
-        current === PaymentRequestStatus.REJETE
+        current === PaymentRequestStatus.REJETE ||
+        current === PaymentRequestStatus.AWAITING_DECHARGE
       ) {
-        throw new BadRequestException('Demande déjà clôturée');
+        throw new BadRequestException('Demande déjà clôturée ou en décharge');
       }
       return this.applyStatus(user, id, PaymentRequestStatus.REJETE, dto.amount);
     }
 
+    if (target === PaymentRequestStatus.PAYE) {
+      throw new BadRequestException(
+        'Le versement PAYÉ se fait via la décharge signée par l’expéditeur',
+      );
+    }
+
     this.assertTransition(user, current, target, requiresExpert);
 
-    if (budgetStress && target !== PaymentRequestStatus.PAYE) {
+    if (
+      budgetStress &&
+      target !== PaymentRequestStatus.AWAITING_DECHARGE
+    ) {
       await this.ensureExpertBatchDeadline(agencyId);
     }
 
-    if (target === PaymentRequestStatus.PAYE) {
-      return this.payRequest(user, existing, dto.amount, agencyId);
+    return this.applyStatus(user, id, target, dto.amount);
+  }
+
+  /** Expéditeur uploads signed décharge → PAYÉ + LIVRES_PAYES. */
+  async uploadDecharge(user: AuthUser, id: number, dechargeUrl: string) {
+    if (user.role !== Role.EXPEDITEUR) throw new ForbiddenException();
+    const url = dechargeUrl?.trim();
+    if (!url || url.length < 4) {
+      throw new BadRequestException('URL de décharge invalide');
     }
 
-    return this.applyStatus(user, id, target, dto.amount);
+    const existing = await this.prisma.paymentRequest.findUnique({
+      where: { id },
+      include: PAYMENT_INCLUDE,
+    });
+    if (!existing) throw new NotFoundException('Payment request not found');
+    if (existing.senderId !== user.id) throw new ForbiddenException();
+    if (normalizeStatus(existing.status) !== PaymentRequestStatus.AWAITING_DECHARGE) {
+      throw new BadRequestException(
+        'Ce versement n’attend pas encore votre décharge signée',
+      );
+    }
+
+    const agencyId = this.paymentAgencyId(existing);
+    const withUrl = await this.prisma.paymentRequest.update({
+      where: { id },
+      data: {
+        dechargeUrl: url,
+        dechargeUploadedAt: new Date(),
+      },
+      include: PAYMENT_INCLUDE,
+    });
+
+    return this.payRequest(user, withUrl, undefined, agencyId);
   }
 
   private assertTransition(
@@ -357,8 +418,8 @@ export class PaymentsService {
       VALIDE_FINANCE: [PaymentRequestStatus.VALIDE_CHEF],
       VALIDE_CHEF: requiresExpert
         ? [PaymentRequestStatus.VALIDE_EXPERT]
-        : [PaymentRequestStatus.PAYE],
-      VALIDE_EXPERT: [PaymentRequestStatus.PAYE],
+        : [PaymentRequestStatus.AWAITING_DECHARGE],
+      VALIDE_EXPERT: [PaymentRequestStatus.AWAITING_DECHARGE],
     };
 
     const next = allowed[current] ?? [];
@@ -383,14 +444,16 @@ export class PaymentsService {
         throw new ForbiddenException('Validation expert comptable requise');
       }
     }
-    if (target === PaymentRequestStatus.PAYE) {
+    if (target === PaymentRequestStatus.AWAITING_DECHARGE) {
       if (requiresExpert) {
         if (
           current !== PaymentRequestStatus.VALIDE_EXPERT &&
           role !== Role.EXPERT_COMPTABLE &&
           !isGlobalStaff(role)
         ) {
-          throw new ForbiddenException('Seul l’expert peut verser ce paiement');
+          throw new ForbiddenException(
+            'Seul l’expert peut préparer ce versement pour décharge',
+          );
         }
       } else if (
         role !== Role.CHEF_AGENCE &&
@@ -398,7 +461,7 @@ export class PaymentsService {
         role !== Role.EXPERT_COMPTABLE &&
         !isGlobalStaff(role)
       ) {
-        throw new ForbiddenException('Versement non autorisé');
+        throw new ForbiddenException('Préparation décharge non autorisée');
       }
     }
   }
@@ -492,7 +555,7 @@ export class PaymentsService {
             parcelId,
             label: 'Livré payé',
             status: ParcelStatus.LIVRES_PAYES,
-            comment: `Paiement #${existing.id} versé`,
+            comment: `Paiement #${existing.id} versé (décharge)`,
             actorId: user.id,
           })),
         });
@@ -502,7 +565,7 @@ export class PaymentsService {
     return toPaymentView(updated);
   }
 
-  /** Expert batch: pay max small-first within 24h under budget stress. */
+  /** Expert batch: move ready payouts to AWAITING_DECHARGE under budget stress. */
   async expertBatchPay(user: AuthUser, agencyId?: number) {
     if (
       user.role !== Role.EXPERT_COMPTABLE &&
@@ -516,7 +579,7 @@ export class PaymentsService {
       select: { id: true, expertBatchDeadlineAt: true },
     });
 
-    const paid: number[] = [];
+    const ready: number[] = [];
     for (const agency of agencies) {
       const register = await this.prisma.cashRegister.findFirst({
         where: {
@@ -563,17 +626,28 @@ export class PaymentsService {
         ) {
           await this.prisma.paymentRequest.update({
             where: { id: row.id },
-            data: { status: PaymentRequestStatus.VALIDE_EXPERT },
+            data: {
+              status: PaymentRequestStatus.VALIDE_EXPERT,
+              statusHistory: appendHistory(
+                row,
+                PaymentRequestStatus.VALIDE_EXPERT,
+                user.email,
+              ),
+            },
           });
           row.status = PaymentRequestStatus.VALIDE_EXPERT;
         }
-        await this.payRequest(user, { ...row, status: PaymentRequestStatus.VALIDE_EXPERT }, undefined, agency.id);
+        await this.applyStatus(
+          user,
+          row.id,
+          PaymentRequestStatus.AWAITING_DECHARGE,
+        );
         balance -= amount;
-        paid.push(row.id);
+        ready.push(row.id);
       }
     }
 
-    return { paidCount: paid.length, paymentIds: paid };
+    return { paidCount: ready.length, paymentIds: ready };
   }
 
   async budgetStatus(user: AuthUser) {

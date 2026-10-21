@@ -96,13 +96,31 @@ export class CreateParcelDto {
   price!: number;
 
   @ApiPropertyOptional({
-    description: 'Prix de vente unitaire (marge). Si omis = COD.',
+    description: 'Prix de vente (affichage). Si omis = COD.',
   })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   unitSalePrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Coût d’achat unitaire (DT). Ignoré si stockItemId fourni.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitCost?: number;
+
+  @ApiPropertyOptional({
+    description: 'Article stock expéditeur — décrémente la quantité',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  stockItemId?: number;
 
   @ApiPropertyOptional({ description: 'Frais livraison débités à l’expéditeur' })
   @IsOptional()

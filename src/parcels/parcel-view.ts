@@ -6,7 +6,7 @@ export const PARCEL_STATUS_LABEL: Record<ParcelStatus, string> = {
   A_ENLEVER: 'En attente de collecte',
   ENLEVES: 'Colis récupéré',
   AU_DEPOT: 'Arrivé au dépôt',
-  EXPEDIE_DESTINATION: 'Expédié vers le dépôt de destination',
+  EXPEDIE_DESTINATION: 'Sortie du dépôt',
   ARRIVE_DESTINATION: 'Arrivé au dépôt de destination',
   AFFECTE_LIVREUR: 'Affecté à un livreur',
   RETOUR_DEPOT: 'Retour en agence',

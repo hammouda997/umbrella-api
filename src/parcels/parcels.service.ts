@@ -49,6 +49,7 @@ import {
 } from '../common/agency-roles';
 import { normalizeCustomInputs } from '../common/parcel-input-defs';
 import { ClientAccountsService } from '../sms/client-accounts.service';
+import { StockService } from '../stock/stock.service';
 
 const STAFF_ROLES: Role[] = OPS_STAFF;
 const SENDER_ROLES: Role[] = [
@@ -95,6 +96,7 @@ export class ParcelsService {
     private readonly navex: NavexService,
     private readonly deliveryRoutes: DeliveryRoutesService,
     private readonly clientAccounts: ClientAccountsService,
+    private readonly stock: StockService,
   ) {}
 
   private normalizePhone(phone: string): string {
@@ -113,6 +115,7 @@ export class ParcelsService {
       address: dto.address,
       price: dto.price,
       unitSalePrice: dto.unitSalePrice,
+      unitCost: dto.unitCost,
       deliveryFee: dto.deliveryFee,
       returnFee: dto.returnFee,
       articleCount: dto.articleCount,
@@ -366,7 +369,25 @@ export class ParcelsService {
       throw new BadRequestException('Téléphone destinataire : 8 chiffres');
     }
 
+    const articleCount = dto.articleCount ?? 1;
+
     const created = await this.prisma.$transaction(async (tx) => {
+      let unitCost =
+        dto.unitCost !== undefined && Number.isFinite(dto.unitCost)
+          ? dto.unitCost
+          : null;
+      let stockItemId: number | null = null;
+
+      if (dto.stockItemId != null) {
+        unitCost = await this.stock.consumeForParcel(
+          tx,
+          user.id,
+          dto.stockItemId,
+          articleCount,
+        );
+        stockItemId = dto.stockItemId;
+      }
+
       const parcel = await tx.parcel.create({
         data: {
           ...this.editableData(dto),
@@ -378,13 +399,15 @@ export class ParcelsService {
           price: dto.price,
           unitSalePrice:
             dto.unitSalePrice !== undefined ? dto.unitSalePrice : dto.price,
+          unitCost,
+          stockItemId,
           deliveryFee:
             dto.deliveryFee !== undefined
               ? dto.deliveryFee
               : DEFAULT_DELIVERY_FEE,
           returnFee:
             dto.returnFee !== undefined ? dto.returnFee : DEFAULT_RETURN_FEE,
-          articleCount: dto.articleCount ?? 1,
+          articleCount,
           parcelCount: dto.parcelCount ?? 1,
           tryProduct: dto.tryProduct ?? dto.allowOpen ?? false,
           isFragile: dto.isFragile ?? false,
@@ -633,6 +656,16 @@ export class ParcelsService {
         where: { id },
         data: { status: ParcelStatus.SUPPRIME },
       });
+      if (
+        parcel.stockItemId &&
+        SENDER_EDITABLE.includes(parcel.status)
+      ) {
+        await this.stock.restockForParcel(
+          tx,
+          parcel.stockItemId,
+          parcel.articleCount ?? 1,
+        );
+      }
       await this.recordEvent(tx, {
         parcelId: id,
         label:
@@ -1170,6 +1203,14 @@ export class ParcelsService {
           ? 'Vérification retour (support)'
           : PARCEL_STATUS_LABEL[dto.status];
 
+    const enteringReturnReceived =
+      dto.status === ParcelStatus.RETOUR_RECU &&
+      parcel.status !== ParcelStatus.RETOUR_RECU;
+
+    const enteringLivres =
+      dto.status === ParcelStatus.LIVRES &&
+      parcel.status !== ParcelStatus.LIVRES;
+
     await this.prisma.$transaction(async (tx) => {
       await tx.parcel.update({
         where: { id },
@@ -1179,8 +1220,18 @@ export class ParcelsService {
           ...(nextDriverId != null ? { driverId: nextDriverId } : {}),
           lastLat: dto.lat,
           lastLng: dto.lng,
+          ...(enteringLivres && !parcel.deliveredAt
+            ? { deliveredAt: new Date() }
+            : {}),
         },
       });
+      if (enteringReturnReceived && parcel.stockItemId) {
+        await this.stock.restockForParcel(
+          tx,
+          parcel.stockItemId,
+          parcel.articleCount ?? 1,
+        );
+      }
       await this.recordEvent(tx, {
         parcelId: id,
         label: eventLabel,

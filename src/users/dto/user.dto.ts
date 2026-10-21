@@ -4,6 +4,7 @@ import {
   IsEmail,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -98,6 +99,14 @@ export class ChangePasswordDto {
   @MinLength(8)
   @MaxLength(128)
   newPassword!: string;
+}
+
+export class UpsertCreateParcelDraftDto {
+  @ApiProperty({
+    description: 'Create-parcel wizard draft JSON (opaque client shape)',
+  })
+  @IsObject()
+  draft!: Record<string, unknown>;
 }
 
 export class UpdateUserActiveDto {

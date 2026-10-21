@@ -91,6 +91,8 @@ model User {
   productTypes     String[]         @default([])
   /** Expéditeur-defined optional inputs shown on create + bordereau. */
   parcelInputDefs  Json?
+  /** In-progress create-parcel wizard draft (cross-browser). */
+  createParcelDraft Json?
   productNotes     String?
   /** Identity verification (expéditeur signup KYC). */
   cinFrontUrl      String?
@@ -120,10 +122,38 @@ model User {
   cashMovements    CashMovement[]
   livreurDeposits  LivreurDeposit[] @relation("LivreurDeposits")
   depositsReviewed LivreurDeposit[] @relation("DepositReviewer")
+  stockItems       SenderStockItem[]
 
   @@index([agencyId])
   @@index([zoneId])
   @@index([approvalStatus])
+}
+
+/** Expéditeur product stock — managed separately from parcel creation. */
+model SenderStockItem {
+  id        Int      @id @default(autoincrement())
+  senderId  Int
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  name      String
+  /** Variant label (ex. Noir, Bleu). Empty string when none. */
+  variant   String   @default("")
+  size      String?
+  sku       String?
+  quantity  Int      @default(0)
+  /** Prix d’achat unitaire (DT) — base de la valeur stock & du profit. */
+  unitCost  Decimal  @db.Decimal(12, 3)
+  /** Prix de vente cible (indicatif, pour estimation marge). */
+  defaultSalePrice Decimal? @db.Decimal(12, 3)
+  /** Seuil d’alerte stock bas. */
+  lowStockAt Int?
+  notes     String?
+  isActive  Boolean  @default(true)
+  parcels   Parcel[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([senderId])
+  @@index([senderId, isActive])
 }
 
 /** Gouvernorat agency — separate from livreur fleet Zone. */
@@ -258,14 +288,18 @@ model Parcel {
   city          String
   locality      String?
   address       String
-  /** COD / montant à encaisser chez le client. */
+  /** COD / montant à encaisser chez le client (= CA si livré). */
   price         Decimal       @db.Decimal(12, 3)
-  /** Prix de vente unitaire (marge expéditeur). Defaults to price when unset. */
+  /** Prix de vente affiché (défaut = price). */
   unitSalePrice Decimal?      @db.Decimal(12, 3)
+  /** Coût d’achat unitaire (snapshot stock ou saisie). */
+  unitCost      Decimal?      @db.Decimal(12, 3)
   /** Frais de livraison débités à l’expéditeur (snapshot à la création). */
   deliveryFee   Decimal       @default(0) @db.Decimal(12, 3)
   /** Frais de retour appliqués si le colis est retourné. */
   returnFee     Decimal       @default(0) @db.Decimal(12, 3)
+  stockItemId   Int?
+  stockItem     SenderStockItem? @relation(fields: [stockItemId], references: [id], onDelete: SetNull)
   articleCount  Int           @default(1)
   parcelCount   Int           @default(1)
   designation   String?
@@ -298,6 +332,8 @@ model Parcel {
   codSettledAt        DateTime?
   codSettledById      Int?
   codSettledBy        User?     @relation("CodSettler", fields: [codSettledById], references: [id], onDelete: SetNull)
+  /** When status first became LIVRES — starts versement hold clock. */
+  deliveredAt         DateTime?
   events              ParcelEvent[]
   senderId      Int
   sender        User          @relation("SenderParcels", fields: [senderId], references: [id])
@@ -320,7 +356,9 @@ model Parcel {
   @@index([mode])
   @@index([driverId])
   @@index([code])
+  @@index([deliveredAt])
   @@index([agencyId])
+  @@index([stockItemId])
 }
 
 enum ReturnLotStatus {
@@ -457,6 +495,8 @@ enum PaymentRequestStatus {
   VALIDE_CHEF
   VALIDE_EXPERT
   APPROUVE
+  /** Staff validated — waiting for expéditeur signed décharge. */
+  AWAITING_DECHARGE
   PAYE
   REJETE
 }
@@ -466,6 +506,9 @@ model PaymentRequest {
   amount        Decimal              @db.Decimal(12, 3)
   status        PaymentRequestStatus @default(EN_DEMANDE)
   note          String?
+  /** Signed décharge from expéditeur confirming receipt. */
+  dechargeUrl         String?
+  dechargeUploadedAt  DateTime?
   /** [{ at, status, label, actorName? }] */
   statusHistory Json?
   senderId      Int
@@ -476,6 +519,13 @@ model PaymentRequest {
 
   @@index([senderId])
   @@index([status])
+}
+
+/** Singleton-style key/value platform config (e.g. versementHoldHours). */
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model PaymentItem {
